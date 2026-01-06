@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+    <resources>
+        <!-- App Name -->
+        <string name="app_name">MP3 Player</string>
+
+        <!-- Main Activity -->
+        <string name="toolbar_title">MP3 Player</string>
+        <string name="content_desc_view_logs">View Logs</string>
+        <string name="content_desc_refresh">Refresh</string>
+        <string name="content_desc_album_art">Album Art</string>
+        <string name="content_desc_play_pause">Play/Pause</string>
+        <string name="content_desc_next">Next</string>
+        <string name="content_desc_previous">Previous</string>
+        <string name="content_desc_favorite">Favorite</string>
+
+        <!-- Tab Titles -->
+        <string name="tab_favorites">Favorites</string>
+        <string name="tab_playlists">Playlists</string>
+        <string name="tab_all">All</string>
+        <string name="tab_folders">Folders</string>
+        <string name="tab_custom">Custom</string>
+
+        <!-- Mini Player -->
+        <string name="mini_player_no_song">No Song Playing</string>
+        <string name="mini_player_unknown_artist">Unknown Artist</string>
+
+        <!-- Player -->
+        <string name="player_no_song">No Song Playing</string>
+        <string name="player_unknown_artist">Unknown Artist</string>
+
+        <!-- Song Item -->
+        <string name="song_title_default">Song Title</string>
+        <string name="song_artist_default">Artist Name</string>
+        <string name="content_desc_music_icon">Music Icon</string>
+
+        <!-- Favorites Fragment -->
+        <string name="favorites_empty_state">No favorites yet\n\nTap the heart icon on songs to add them here</string>
+
+        <!-- Placeholder Fragments -->
+        <string name="placeholder_coming_soon">Coming Soon</string>
+        <string name="placeholder_playlists">Playlists\n\nComing Soon!</string>
+        <string name="placeholder_folders">Folders\n\nComing Soon!</string>
+        <string name="placeholder_custom">Custom\n\nComing Soon!</string>
+
+        <!-- Activity Logs -->
+        <string name="logs_title">Activity Logs</string>
+        <string name="logs_statistics_title">LISTENING STATISTICS</string>
+        <string name="loading">Loading…</string>
+        <string name="logs_export_csv">Export CSV</string>
+        <string name="logs_export_json">Export JSON</string>
+        <string name="logs_clear_all">Clear All Logs</string>
+        <string name="logs_recent_activity">RECENT ACTIVITY</string>
+        <string name="logs_back_to_player">Back to Player</string>
+
+        <!-- Toast Messages -->
+        <string name="toast_full_player_soon">Full player coming soon!</string>
+        <string name="toast_rescanning">Rescanning for songs…</string>
+        <string name="toast_grant_permission">Please grant storage permission first</string>
+        <string name="toast_cache_cleared">Cache cleared. Performing full scan…</string>
+        <string name="toast_loaded_from_cache">Loaded %d songs from cache</string>
+        <string name="toast_checking_new_songs">Checking for new songs…</string>
+        <string name="toast_library_up_to_date">Library up to date (%d songs)</string>
+        <string name="toast_songs_added_removed">%s (Total: %d)</string>
+        <string name="toast_no_audio_files">No audio files found. Add MP3 files to Music or Download folder</string>
+        <string name="toast_permission_denied">Permission denied. Cannot load songs.</string>
+        <string name="toast_error_starting_app">Error starting app: %s</string>
+        <string name="toast_logs_cleared">Logs cleared</string>
+        <string name="toast_exported_to">Exported to: %s</string>
+        <string name="toast_export_failed">Export failed: %s</string>
+
+        <!-- Share -->
+        <string name="share_logs_title">Share logs</string>
+
+        <!-- CSV Headers -->
+        <string name="csv_header">Timestamp,Event Type,Song Title,Artist,Song Path,Position (ms),Additional Info</string>
+        <string name="start_time_default">00:00</string>
+        <string name="activity_logs">Activity Logs</string>
+        <string name="listening_statistics">LISTENING STATISTICS</string>
+        <string name="export_csv">Export CSV</string>
+        <string name="export_json">Export JSON</string>
+        <string name="clear_all_logs">Clear All Logs</string>
+        <string name="back_to_player">Back to Player</string>
+        <string name="recent_activity">RECENT ACTIVITY</string>
+    <string name="aggressive">Aggressive</string>
+</resources>
