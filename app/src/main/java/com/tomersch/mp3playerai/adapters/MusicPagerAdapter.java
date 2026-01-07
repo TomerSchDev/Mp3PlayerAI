@@ -11,36 +11,21 @@ import com.tomersch.mp3playerai.fragments.FavoritesFragment;
 import com.tomersch.mp3playerai.fragments.FoldersFragment;
 import com.tomersch.mp3playerai.fragments.PlaylistsFragment;
 
+import java.util.HashMap;
+import java.util.Map;
+
+
 /**
  * Adapter for ViewPager2 to handle tab fragments
  */
 public class MusicPagerAdapter extends FragmentStateAdapter {
-
-    private AllSongsFragment allSongsFragment;
-    private FavoritesFragment favoritesFragment;
-
-    public MusicPagerAdapter(@NonNull FragmentActivity fragmentActivity) {
-        super(fragmentActivity);
-        allSongsFragment = AllSongsFragment.newInstance();
-        favoritesFragment = FavoritesFragment.newInstance();
-    }
-
     @NonNull
     @Override
     public Fragment createFragment(int position) {
-        switch (position) {
-            case 0:
-                return favoritesFragment;
-            case 1:
-                return PlaylistsFragment.newInstance();
-            case 3:
-                return FoldersFragment.newInstance();
-            case 4:
-                return CustomFragment.newInstance();
-            case 2:
-            default:
-                return allSongsFragment;
+        if (position >= 0 && position < this.tabsArray.length) {
+            return tabs.get(this.tabsArray[position]);
         }
+        return tabs.get(Tab.ALL);
     }
 
     @Override
@@ -48,11 +33,28 @@ public class MusicPagerAdapter extends FragmentStateAdapter {
         return 5; // Favorites, Playlists, All, Folders, Custom
     }
 
-    public AllSongsFragment getAllSongsFragment() {
-        return allSongsFragment;
+
+    public static enum Tab {
+        FAVORITES, PLAYLISTS, ALL, FOLDERS, CUSTOM
     }
 
-    public FavoritesFragment getFavoritesFragment() {
-        return favoritesFragment;
+    private final Map<Tab,Fragment> tabs= new HashMap<>();
+    private final Tab[] tabsArray = Tab.values();
+
+    public MusicPagerAdapter(@NonNull FragmentActivity fragmentActivity) {
+        super(fragmentActivity);
+        tabs.put(Tab.FAVORITES, FavoritesFragment.newInstance());
+        tabs.put(Tab.PLAYLISTS, PlaylistsFragment.newInstance());
+        tabs.put(Tab.ALL, AllSongsFragment.newInstance());
+        tabs.put(Tab.FOLDERS, FoldersFragment.newInstance());
+        tabs.put(Tab.CUSTOM, CustomFragment.newInstance());
+
     }
+    public Fragment getTab(Tab tab)
+    {
+        return tabs.get(tab);
+    }
+
+
 }
+

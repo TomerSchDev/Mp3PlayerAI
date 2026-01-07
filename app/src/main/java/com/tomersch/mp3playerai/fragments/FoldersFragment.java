@@ -1,7 +1,6 @@
 package com.tomersch.mp3playerai.fragments;
 
 import android.os.Bundle;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,79 +18,144 @@ import com.tomersch.mp3playerai.adapters.FolderAdapter;
 import com.tomersch.mp3playerai.models.MusicFolder;
 import com.tomersch.mp3playerai.models.Song;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Fragment for Folders tab
  */
 public class FoldersFragment extends Fragment {
-    private RecyclerView rvFolders;
-    private FolderAdapter adapter;
 
-    public static FoldersFragment newInstance() { return new FoldersFragment(); }
+    private RecyclerView recyclerView;
+    private TextView tvEmptyState;
+    private FolderAdapter folderAdapter;
+    private List<Song> songList;
 
+    public static FoldersFragment newInstance() {
+        if (foldersFragment == null) {
+            foldersFragment = new FoldersFragment();
+        }
+        return foldersFragment;
+    }
+    private FoldersFragment() {};
+    private static FoldersFragment foldersFragment;
+    @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_folders, container, false);
-        rvFolders = view.findViewById(R.id.rvFolders);
-        rvFolders.setLayoutManager(new LinearLayoutManager(getContext()));
 
-        // This would be called once your MainActivity loads the songs
-        loadFolders();
+        // Use the correct IDs from your layout
+        recyclerView = view.findViewById(R.id.rvFolders);
+        tvEmptyState = view.findViewById(R.id.tvESFolders);
+
+        if (recyclerView == null) {
+            return view;
+        }
+
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+
+        if (songList != null) {
+            List<MusicFolder> folderItems = groupSongsByFolder(songList);
+            if (folderItems.isEmpty()) {
+                if (tvEmptyState != null) {
+                    tvEmptyState.setVisibility(View.VISIBLE);
+                }
+                recyclerView.setVisibility(View.GONE);
+            } else {
+                if (tvEmptyState != null) {
+                    tvEmptyState.setVisibility(View.GONE);
+                }
+                recyclerView.setVisibility(View.VISIBLE);
+                folderAdapter = new FolderAdapter(folderItems, this::onFolderClick);
+                recyclerView.setAdapter(folderAdapter);
+            }
+        }
+
         return view;
     }
 
-    private void loadFolders() {
-        // 1. Get all songs from your Cache or MainActivity
-        Log.d("FoldersFragment", "loadFolders called");
-        List<Song> allSongs = ((MainActivity)getActivity()).getSongList();
-        if (allSongs == null)
-        {
-            Log.e("FoldersFragment", "allSongs is null");
-            return;
-        }
-
-
-        // 2. Map to group by parent path
-        final Map<String, List<Song>> groups = new HashMap<>();
-        for (Song s : allSongs) {
-            if (s == null) continue;
-            File file = new File(s.getPath());
-            String parent = file.getParent();
-            if (!groups.containsKey(parent)) groups.put(parent, new ArrayList<>());
-            Objects.requireNonNull(groups.get(parent)).add(s);
-        }
-
-        // 3. Convert map to list of MusicFolder objects
-        List<MusicFolder> folderList = new ArrayList<>();
-        for (String path : groups.keySet()) {
-            String name = path.substring(path.lastIndexOf("/") + 1);
-            folderList.add(new MusicFolder(name, path, groups.get(path).size()));
-        }
-
-        adapter = new FolderAdapter(folderList, folder -> {
-            // We already have the list of songs for this folder in our 'groups' map
-            // Make sure 'groups' is accessible here
-            List<Song> songsInFolder = groups.get(folder.getFolderPath());
-
-            if (songsInFolder != null) {
-                // Pass the already calculated list to the detail fragment
-                SubFolderFragment detailFragment = SubFolderFragment.newInstance(
-                        new ArrayList<>(songsInFolder),
-                        folder.getFolderName()
-                );
-
-                getChildFragmentManager().beginTransaction()
-                        .replace(R.id.folder_container, detailFragment)
-                        .addToBackStack(null)
-                        .commit();
+    /**
+     * Set the song list
+     */
+    public void setSongList(List<Song> songs) {
+        this.songList = songs;
+        if (recyclerView != null) {
+            List<MusicFolder> folderItems = groupSongsByFolder(songs);
+            if (folderItems.isEmpty()) {
+                if (tvEmptyState != null) {
+                    tvEmptyState.setVisibility(View.VISIBLE);
+                }
+                recyclerView.setVisibility(View.GONE);
+            } else {
+                if (tvEmptyState != null) {
+                    tvEmptyState.setVisibility(View.GONE);
+                }
+                recyclerView.setVisibility(View.VISIBLE);
+                folderAdapter = new FolderAdapter(folderItems, this::onFolderClick);
+                recyclerView.setAdapter(folderAdapter);
             }
-        });
-        rvFolders.setAdapter(adapter);
+        }
+    }
+
+    /**
+     * Group songs by folder path
+     */
+    private List<MusicFolder> groupSongsByFolder(List<Song> songs) {
+        Map<String, List<Song>> folderMap = new HashMap<>();
+
+        for (Song song : songs) {
+            String path = song.getPath();
+            String folderPath = path.substring(0, path.lastIndexOf("/"));
+            String folderName = folderPath.substring(folderPath.lastIndexOf("/") + 1);
+
+            if (!folderMap.containsKey(folderPath)) {
+                folderMap.put(folderPath, new ArrayList<>());
+            }
+            folderMap.get(folderPath).add(song);
+        }
+
+        List<MusicFolder> folderItems = new ArrayList<>();
+        for (Map.Entry<String, List<Song>> entry : folderMap.entrySet()) {
+            String folderPath = entry.getKey();
+            String folderName = folderPath.substring(folderPath.lastIndexOf("/") + 1);
+            List<Song> songsInFolder = entry.getValue();
+            folderItems.add(new MusicFolder(folderName, folderPath, songsInFolder.size()));
+        }
+
+        return folderItems;
+    }
+
+    /**
+     * Handle folder click
+     */
+    private void onFolderClick(MusicFolder musicFolder) {
+        // Filter songs that belong to this folder
+        List<Song> songsInFolder = new ArrayList<>();
+        for (Song song : songList) {
+            String songFolderPath = song.getPath().substring(0, song.getPath().lastIndexOf("/"));
+            if (songFolderPath.equals(musicFolder.getFolderPath())) {
+                songsInFolder.add(song);
+            }
+        }
+
+        // Create subtitle showing song count
+        String subtitle = songsInFolder.size() + " song" +
+                (songsInFolder.size() != 1 ? "s" : "");
+
+        // Use ListContainerFragment to show songs in this folder
+        ListContainerFragment containerFragment = ListContainerFragment.newInstance(
+                new ArrayList<>(songsInFolder),
+                musicFolder.getFolderName(),
+                subtitle
+        );
+
+        // Use child fragment manager to add to the folder_container
+        getChildFragmentManager().beginTransaction()
+                .replace(R.id.folder_container, containerFragment)
+                .addToBackStack(null)
+                .commit();
     }
 }

@@ -12,6 +12,10 @@
         <string name="content_desc_next">Next</string>
         <string name="content_desc_previous">Previous</string>
         <string name="content_desc_favorite">Favorite</string>
+        <string name="content_desc_back">Back</string>
+        <string name="content_desc_playlist_icon">Playlist Icon</string>
+        <string name="content_desc_playlist_options">Playlist Options</string>
+        <string name="content_desc_create_playlist">Create Playlist</string>
 
         <!-- Tab Titles -->
         <string name="tab_favorites">Favorites</string>
@@ -35,7 +39,28 @@
 
         <!-- Favorites Fragment -->
         <string name="favorites_empty_state">No favorites yet\n\nTap the heart icon on songs to add them here</string>
+    s
+        <!-- Playlists Fragment -->
+        <string name="playlists_empty_state">No playlists yet\n\nTap + to create your first playlist</string>
 
+        <!-- Playlist Dialogs -->
+        <string name="dialog_create_playlist_title">Create Playlist</string>
+        <string name="dialog_rename_playlist_title">Rename Playlist</string>
+        <string name="dialog_delete_playlist_title">Delete Playlist</string>
+        <string name="dialog_delete_playlist_message">Are you sure you want to delete "%s"?</string>
+        <string name="dialog_playlist_name_hint">Playlist name</string>
+        <string name="dialog_create">Create</string>
+        <string name="dialog_rename">Rename</string>
+        <string name="dialog_delete">Delete</string>
+        <string name="dialog_cancel">Cancel</string>
+        <string name="dialog_option_rename">Rename</string>
+        <string name="dialog_option_delete">Delete</string>
+
+        <!-- Playlist Toast Messages -->
+        <string name="toast_playlist_created">Playlist "%s" created</string>
+        <string name="toast_playlist_renamed">Playlist renamed to "%s"</string>
+        <string name="toast_playlist_deleted">Playlist "%s" deleted</string>
+        <string name="toast_playlist_name_required">Playlist name is required</string>
         <!-- Placeholder Fragments -->
         <string name="placeholder_coming_soon">Coming Soon</string>
         <string name="placeholder_playlists">Playlists\n\nComing Soon!</string>
@@ -54,11 +79,11 @@
 
         <!-- Toast Messages -->
         <string name="toast_full_player_soon">Full player coming soon!</string>
-        <string name="toast_rescanning">Rescanning for songs…</string>
+        <string name="toast_rescanning">Rescanning for songs...</string>
         <string name="toast_grant_permission">Please grant storage permission first</string>
-        <string name="toast_cache_cleared">Cache cleared. Performing full scan…</string>
+        <string name="toast_cache_cleared">Cache cleared. Performing full scan...</string>
         <string name="toast_loaded_from_cache">Loaded %d songs from cache</string>
-        <string name="toast_checking_new_songs">Checking for new songs…</string>
+        <string name="toast_checking_new_songs">Checking for new songs...</string>
         <string name="toast_library_up_to_date">Library up to date (%d songs)</string>
         <string name="toast_songs_added_removed">%s (Total: %d)</string>
         <string name="toast_no_audio_files">No audio files found. Add MP3 files to Music or Download folder</string>

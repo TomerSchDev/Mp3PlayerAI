@@ -24,7 +24,7 @@ public class SubFolderFragment extends Fragment {
     private SongAdapter songAdapter;
     private List<Song> folderSongs;
     private String folderName;
-
+    private SubFolderFragment() {};
     public static SubFolderFragment newInstance(ArrayList<Song> songs, String name) {
         SubFolderFragment fragment = new SubFolderFragment();
         Bundle args = new Bundle();

@@ -1,5 +1,9 @@
 package com.tomersch.mp3playerai.activities;
 
+import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.*;
+import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.ALL;
+import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.FOLDERS;
+
 import android.Manifest;
 import android.content.ComponentName;
 import android.content.Context;
@@ -26,20 +30,22 @@ import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.MusicPagerAdapter;
-import com.tomersch.mp3playerai.adapters.SongAdapter;
+import com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab;
 import com.tomersch.mp3playerai.fragments.AllSongsFragment;
 import com.tomersch.mp3playerai.fragments.FavoritesFragment;
+import com.tomersch.mp3playerai.fragments.FoldersFragment;
 import com.tomersch.mp3playerai.models.Song;
 import com.tomersch.mp3playerai.utils.ManualFileScanner;
 import com.tomersch.mp3playerai.utils.MusicService;
 import com.tomersch.mp3playerai.utils.SongCacheManager;
 import com.tomersch.mp3playerai.utils.UserActivityLogger;
 import com.tomersch.mp3playerai.utils.FavoritesManager;
+import com.tomersch.mp3playerai.utils.PlaylistManager;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class MainActivity extends AppCompatActivity implements SongAdapter.OnSongClickListener {
+public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MP3Player";
     private static final int PERMISSION_REQUEST_CODE = 100;
@@ -61,14 +67,18 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
     private ImageButton btnRefresh;
     private ImageButton btnViewLogs;
 
+    // Data
+    private List<Song> songList = new ArrayList<>();
+
     // Utils
     private SongCacheManager cacheManager;
     private UserActivityLogger activityLogger;
     private FavoritesManager favoritesManager;
+    private PlaylistManager playlistManager;
     private MusicService musicService;
     private boolean serviceBound = false;
 
-    private final ServiceConnection serviceConnection = new ServiceConnection() {
+    private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             MusicService.MusicBinder binder = (MusicService.MusicBinder) service;
@@ -111,6 +121,7 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
             cacheManager = new SongCacheManager(this);
             activityLogger = new UserActivityLogger(this);
             favoritesManager = new FavoritesManager(this);
+            playlistManager = new PlaylistManager(this);
             activityLogger.logAppOpened();
 
             Log.d(TAG, "Initializing views");
@@ -126,7 +137,9 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
             setupButtons();
 
             // Listen for favorites changes to update fragments
-            favoritesManager.addListener(this::updateFavoritesTab);
+            favoritesManager.addListener(() -> {
+                updateFavoritesTab();
+            });
 
             if (checkPermissions()) {
                 loadSongs();
@@ -137,9 +150,7 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
             Log.d(TAG, "onCreate completed successfully");
         } catch (Exception e) {
             Log.e(TAG, "Error in onCreate: " + e.getMessage(), e);
-            Toast.makeText(this,
-                    getString(R.string.toast_error_starting_app, e.getMessage()),
-                    Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -176,33 +187,37 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
                     (tab, position) -> tab.setText(TAB_TITLES[position])
             ).attach();
 
-            // CRITICAL: Set FavoritesManager on fragments immediately after ViewPager creates them
-            // Use a longer delay to ensure fragments are fully created
+            // CRITICAL: Set FavoritesManager on fragments after ViewPager creates them
             viewPager.postDelayed(() -> {
-                Log.d(TAG, "Setting up fragment listeners and FavoritesManager");
+                Log.d(TAG, "Setting up fragments with managers");
 
                 try {
-                    AllSongsFragment allSongsFragment = pagerAdapter.getAllSongsFragment();
+                    AllSongsFragment allSongsFragment = (AllSongsFragment) pagerAdapter.getTab(ALL);
                     if (allSongsFragment != null) {
-                        allSongsFragment.setSongClickListener(this);
                         allSongsFragment.setFavoritesManager(favoritesManager);
                         Log.d(TAG, "AllSongsFragment: FavoritesManager set");
                     } else {
                         Log.e(TAG, "AllSongsFragment is NULL!");
                     }
 
-                    FavoritesFragment favoritesFragment = pagerAdapter.getFavoritesFragment();
+                    FavoritesFragment favoritesFragment = (FavoritesFragment) pagerAdapter.getTab(FAVORITES);
                     if (favoritesFragment != null) {
-                        favoritesFragment.setSongClickListener(this);
                         favoritesFragment.setFavoritesManager(favoritesManager);
                         Log.d(TAG, "FavoritesFragment: FavoritesManager set");
                     } else {
                         Log.e(TAG, "FavoritesFragment is NULL!");
                     }
+
+                    FoldersFragment foldersFragment = (FoldersFragment) pagerAdapter.getTab(FOLDERS);
+                    if (foldersFragment != null) {
+                        Log.d(TAG, "FoldersFragment: Ready");
+                    } else {
+                        Log.e(TAG, "FoldersFragment is NULL!");
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error setting up fragments: " + e.getMessage(), e);
                 }
-            }, 100); // Small delay to ensure fragments are created
+            }, 100);
 
             Log.d(TAG, "Tabs setup successfully");
         } catch (Exception e) {
@@ -212,7 +227,9 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
     }
 
     private void setupMiniPlayer() {
-        miniPlayer.setOnClickListener(v -> Toast.makeText(this, R.string.toast_full_player_soon, Toast.LENGTH_SHORT).show());
+        miniPlayer.setOnClickListener(v -> {
+            Toast.makeText(this, "Full player coming soon!", Toast.LENGTH_SHORT).show();
+        });
 
         miniPlayerPlayPause.setOnClickListener(v -> {
             if (serviceBound && musicService != null) {
@@ -234,11 +251,10 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
     private void setupButtons() {
         btnRefresh.setOnClickListener(v -> {
             if (checkPermissions()) {
-                Toast.makeText(this, R.string.toast_rescanning, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Rescanning for songs...", Toast.LENGTH_SHORT).show();
                 loadSongs();
             } else {
-                Toast.makeText(this, R.string.toast_grant_permission,
-                        Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Please grant storage permission", Toast.LENGTH_SHORT).show();
                 requestPermissions();
             }
         });
@@ -250,8 +266,7 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
 
         btnRefresh.setOnLongClickListener(v -> {
             cacheManager.clearCache();
-            Toast.makeText(this, R.string.toast_cache_cleared,
-                    Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Cache cleared!", Toast.LENGTH_SHORT).show();
             if (checkPermissions()) {
                 loadSongs();
             }
@@ -261,7 +276,6 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
 
     private void loadSongs() {
         Log.d(TAG, "========== Starting to load songs ==========");
-
         if (cacheManager.hasCachedSongs()) {
             List<Song> cachedSongs = cacheManager.loadCachedSongs();
             updateFragments(cachedSongs);
@@ -313,6 +327,7 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
             });
         }).start();
 
+
         Log.d(TAG, "========== Finished loading songs ==========");
     }
 
@@ -320,14 +335,21 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
         try {
             Log.d(TAG, "updateFragments called with " + songs.size() + " songs");
 
-            AllSongsFragment allSongsFragment = pagerAdapter.getAllSongsFragment();
+            AllSongsFragment allSongsFragment = (AllSongsFragment) pagerAdapter.getTab(ALL);
             if (allSongsFragment != null) {
-                // Make sure FavoritesManager is set before updating
                 allSongsFragment.setFavoritesManager(favoritesManager);
-                allSongsFragment.updateSongs(songs);
+                allSongsFragment.setSongList(songs);
                 Log.d(TAG, "AllSongsFragment updated with songs");
             } else {
                 Log.e(TAG, "AllSongsFragment is NULL in updateFragments!");
+            }
+
+            FoldersFragment foldersFragment = (FoldersFragment) pagerAdapter.getTab(FOLDERS);
+            if (foldersFragment != null) {
+                foldersFragment.setSongList(songs);
+                Log.d(TAG, "FoldersFragment updated with songs");
+            } else {
+                Log.e(TAG, "FoldersFragment is NULL in updateFragments!");
             }
 
             updateFavoritesTab();
@@ -338,26 +360,70 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
 
     private void updateFavoritesTab() {
         try {
-            List<Song> allSongs = pagerAdapter.getAllSongsFragment().getSongs();
             List<Song> favoriteSongs = new ArrayList<>();
 
-            for (Song song : allSongs) {
+            for (Song song : songList) {
                 if (favoritesManager.isFavorite(song.getPath())) {
                     favoriteSongs.add(song);
                 }
             }
 
-            pagerAdapter.getFavoritesFragment().updateFavorites(favoriteSongs);
-            Log.d(TAG, "Updated favorites tab with " + favoriteSongs.size() + " songs");
+            FavoritesFragment favoritesFragment = (FavoritesFragment) pagerAdapter.getTab(FAVORITES);
+            if (favoritesFragment != null) {
+                favoritesFragment.updateFavorites(favoriteSongs);
+                Log.d(TAG, "Updated favorites tab with " + favoriteSongs.size() + " songs");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error updating favorites tab: " + e.getMessage(), e);
         }
     }
 
-    @Override
-    public void onSongClick(int position) {
-        List<Song> songs = pagerAdapter.getAllSongsFragment().getSongs();
-        playSong(songs, position);
+    /**
+     * Play a song from a list at a specific position
+     * Called by fragments when user taps a song
+     */
+    public void playSong(List<Song> songs, int position) {
+        if (songs != null && !songs.isEmpty() && position >= 0 && position < songs.size()) {
+            Song selectedSong = songs.get(position);
+
+            activityLogger.logSongSelected(selectedSong, position);
+
+            Intent intent = new Intent(this, MusicService.class);
+            intent.setAction(MusicService.ACTION_PLAY);
+            startService(intent);
+
+            if (serviceBound && musicService != null) {
+                musicService.setSongList(new ArrayList<>(songs));
+                musicService.setActivityLogger(activityLogger);
+                musicService.playSong(position);
+            }
+
+            showMiniPlayer();
+        }
+    }
+
+    /**
+     * Get the current song list
+     * Used by fragments to access songs
+     */
+    public List<Song> getSongList() {
+        return songList != null ? new ArrayList<>(songList) : new ArrayList<>();
+    }
+
+    /**
+     * Get the FavoritesManager instance
+     * Used by fragments to manage favorites
+     */
+    public FavoritesManager getFavoritesManager() {
+        return favoritesManager;
+    }
+
+    /**
+     * Get the PlaylistManager instance
+     * Used by fragments to manage playlists
+     */
+    public PlaylistManager getPlaylistManager() {
+        return playlistManager;
     }
 
     private void showMiniPlayer() {
@@ -415,43 +481,11 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
                 loadSongs();
             } else {
                 Log.e(TAG, "Permission DENIED by user");
-                Toast.makeText(this, R.string.toast_permission_denied,
+                Toast.makeText(this, "Permission denied - cannot load songs",
                         Toast.LENGTH_LONG).show();
             }
         }
     }
-    public void playSong(List<Song> playlist, int position) {
-        if (playlist == null || playlist.isEmpty() || position < 0 || position >= playlist.size()) {
-            Log.e(TAG, "Invalid playlist or position in playSong");
-            return;
-        }
-
-        Song selectedSong = playlist.get(position);
-        activityLogger.logSongSelected(selectedSong, position);
-
-        // 1. Ensure the service is started so it lives even if activity stops
-        Intent intent = new Intent(this, MusicService.class);
-        intent.setAction(MusicService.ACTION_PLAY);
-        startService(intent);
-
-        // 2. Communicate with the bound service
-        if (serviceBound && musicService != null) {
-            musicService.setSongList(playlist);
-            musicService.setActivityLogger(activityLogger);
-            musicService.playSong(position);
-
-            // Ensure the mini player is visible and showing correct data
-            showMiniPlayer();
-            updateUI(selectedSong);
-            updatePlayPauseButtons(true);
-        } else {
-            Toast.makeText(this, "Music Service not ready yet", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * Standard interface for AllSongsFragment and FavoritesFragment
-     */
 
     @Override
     protected void onStart() {
@@ -475,13 +509,5 @@ public class MainActivity extends AppCompatActivity implements SongAdapter.OnSon
         if (activityLogger != null) {
             activityLogger.logAppClosed();
         }
-    }
-
-    public List<Song> getSongList() {
-        return pagerAdapter.getAllSongsFragment().getSongs();
-    }
-
-    public FavoritesManager getFavoritesManager() {
-        return favoritesManager;
     }
 }
