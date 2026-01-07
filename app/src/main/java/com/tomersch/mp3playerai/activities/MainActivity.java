@@ -1,8 +1,6 @@
 package com.tomersch.mp3playerai.activities;
 
-import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.*;
-import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.ALL;
-import static com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab.FOLDERS;
+import static com.tomersch.mp3playerai.utils.UiUtils.dp;
 
 import android.Manifest;
 import android.content.ComponentName;
@@ -14,7 +12,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -24,227 +24,351 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.widget.ViewPager2;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.MusicPagerAdapter;
-import com.tomersch.mp3playerai.adapters.MusicPagerAdapter.Tab;
-import com.tomersch.mp3playerai.fragments.AllSongsFragment;
-import com.tomersch.mp3playerai.fragments.FavoritesFragment;
-import com.tomersch.mp3playerai.fragments.FoldersFragment;
 import com.tomersch.mp3playerai.models.Song;
+import com.tomersch.mp3playerai.models.Tab;
+import com.tomersch.mp3playerai.player.LibraryProvider;
+import com.tomersch.mp3playerai.player.PlayerController;
+import com.tomersch.mp3playerai.utils.LibraryRepository;
 import com.tomersch.mp3playerai.utils.ManualFileScanner;
 import com.tomersch.mp3playerai.utils.MusicService;
 import com.tomersch.mp3playerai.utils.SongCacheManager;
 import com.tomersch.mp3playerai.utils.UserActivityLogger;
-import com.tomersch.mp3playerai.utils.FavoritesManager;
-import com.tomersch.mp3playerai.utils.PlaylistManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-public class MainActivity extends AppCompatActivity {
+/**
+ * MainActivity
+ * - owns UI (tabs + mini player + bottom sheet full player)
+ * - owns scanning + initializes LibraryRepository
+ * - binds to MusicService and implements PlayerController
+ */
+public class MainActivity extends AppCompatActivity
+        implements PlayerController, LibraryProvider, MusicService.Callback {
 
     private static final String TAG = "MP3Player";
     private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final String[] TAB_TITLES = {"Favorites", "Playlists", "All", "Folders", "Custom"};
 
-    // UI Components
+
+    //new PlayList Button
+    // Tabs
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
-    private MusicPagerAdapter pagerAdapter;
 
-    // Mini Player
+    // Toolbar buttons
+    private ImageButton btnRefresh;
+    private ImageButton btnViewLogs;
+
+    // Mini player
     private LinearLayout miniPlayer;
     private TextView miniPlayerTitle;
     private TextView miniPlayerArtist;
     private ImageButton miniPlayerPlayPause;
     private ImageButton miniPlayerNext;
 
-    // Buttons
-    private ImageButton btnRefresh;
-    private ImageButton btnViewLogs;
+    // Full player bottom sheet
+    private View bottomSheetPlayer;
+    private BottomSheetBehavior<View> bottomSheetBehavior;
 
-    // Data
-    private List<Song> songList = new ArrayList<>();
+    private TextView playerSongTitle;
+    private TextView playerArtistName;
+    private ImageButton playerBtnPrevious;
+    private ImageButton playerBtnPlayPause;
+    private ImageButton playerBtnNext;
+    private ImageButton btnMinimize;
 
-    // Utils
+    // Optional queue list in full player
+    private RecyclerView playerQueue;
+    private QueueAdapter queueAdapter;
+
+    // Core data
+    private LibraryRepository library;
     private SongCacheManager cacheManager;
     private UserActivityLogger activityLogger;
-    private FavoritesManager favoritesManager;
-    private PlaylistManager playlistManager;
+
+    // Service
     private MusicService musicService;
     private boolean serviceBound = false;
 
-    private ServiceConnection serviceConnection = new ServiceConnection() {
+    // Pending play if user taps before bind completes
+    private ArrayList<Song> pendingQueue = null;
+    private int pendingIndex = -1;
+
+    private final Runnable repoListener = this::onRepositoryChanged;
+
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             MusicService.MusicBinder binder = (MusicService.MusicBinder) service;
             musicService = binder.getService();
             serviceBound = true;
 
-            musicService.setOnSongChangeListener(new MusicService.OnSongChangeListener() {
-                @Override
-                public void onSongChanged(Song song) {
-                    updateUI(song);
-                }
+            musicService.setCallback(MainActivity.this);
+            musicService.setActivityLogger(activityLogger);
 
-                @Override
-                public void onPlaybackStateChanged(boolean isPlaying) {
-                    updatePlayPauseButtons(isPlaying);
-                }
-            });
+            // Apply pending request
+            if (pendingQueue != null && pendingIndex >= 0) {
+                musicService.setQueue(pendingQueue, pendingIndex);
+                pendingQueue = null;
+                pendingIndex = -1;
+            }
 
-            if (musicService.getCurrentSong() != null) {
-                updateUI(musicService.getCurrentSong());
-                updatePlayPauseButtons(musicService.isPlaying());
+            // Sync UI
+            Song current = musicService.getCurrentSong();
+            if (current != null) {
+                onSongChanged(current);
+                onPlaybackState(musicService.isPlaying());
                 showMiniPlayer();
+                syncQueueUI();
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             serviceBound = false;
+            musicService = null;
         }
     };
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         try {
-            Log.d(TAG, "onCreate started");
             setContentView(R.layout.activity_main);
+            View root = findViewById(android.R.id.content);
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int bottom = insets.getSystemWindowInsetBottom();
 
+                // push mini player above nav bar
+                View mini = findViewById(R.id.miniPlayer);
+                if (mini != null) mini.setPadding(mini.getPaddingLeft(), mini.getPaddingTop(),
+                        mini.getPaddingRight(), bottom);
+
+
+
+                return insets;
+            });
+            root.requestApplyInsets();
+
+            library = LibraryRepository.getInstance(this);
             cacheManager = new SongCacheManager(this);
             activityLogger = new UserActivityLogger(this);
-            favoritesManager = new FavoritesManager(this);
-            playlistManager = new PlaylistManager(this);
             activityLogger.logAppOpened();
 
-            Log.d(TAG, "Initializing views");
-            initializeViews();
-
-            Log.d(TAG, "Setting up tabs");
+            bindViews();
             setupTabs();
-
-            Log.d(TAG, "Setting up mini player");
             setupMiniPlayer();
-
-            Log.d(TAG, "Setting up buttons");
+            setupFullPlayer();
             setupButtons();
+            library.addListener(repoListener);
 
-            // Listen for favorites changes to update fragments
-            favoritesManager.addListener(() -> {
-                updateFavoritesTab();
-            });
+            if (checkPermissions()) loadSongs();
+            else requestPermissions();
 
-            if (checkPermissions()) {
-                loadSongs();
-            } else {
-                requestPermissions();
-            }
-
-            Log.d(TAG, "onCreate completed successfully");
         } catch (Exception e) {
-            Log.e(TAG, "Error in onCreate: " + e.getMessage(), e);
+            Log.e(TAG, "onCreate error: " + e.getMessage(), e);
             Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
-    private void initializeViews() {
-        try {
-            tabLayout = findViewById(R.id.tabLayout);
-            viewPager = findViewById(R.id.viewPager);
-            btnRefresh = findViewById(R.id.btnRefresh);
-            btnViewLogs = findViewById(R.id.btnViewLogs);
+    /* ============================================================
+       LibraryProvider
+       ============================================================ */
 
-            // Mini Player
-            miniPlayer = findViewById(R.id.miniPlayer);
-            miniPlayerTitle = findViewById(R.id.miniPlayerTitle);
-            miniPlayerArtist = findViewById(R.id.miniPlayerArtist);
-            miniPlayerPlayPause = findViewById(R.id.miniPlayerPlayPause);
-            miniPlayerNext = findViewById(R.id.miniPlayerNext);
+    @Override
+    public LibraryRepository getLibraryRepository() {
+        return library;
+    }
 
-            Log.d(TAG, "All views initialized successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "Error initializing views: " + e.getMessage(), e);
-            throw e;
+    /* ============================================================
+       PlayerController
+       ============================================================ */
+
+    @Override
+    public void playQueue(List<Song> songs, int startIndex) {
+        if (songs == null || songs.isEmpty() || startIndex < 0 || startIndex >= songs.size()) return;
+
+        // Ensure service exists
+        startService(new Intent(this, MusicService.class));
+
+        ArrayList<Song> q = new ArrayList<>(songs);
+
+        if (serviceBound && musicService != null) {
+            musicService.setQueue(q, startIndex);
+        } else {
+            pendingQueue = q;
+            pendingIndex = startIndex;
         }
+
+        showMiniPlayer();
+        changePlayer(true);
+    }
+
+    @Override
+    public void playSong(Song song) {
+        if (song == null) return;
+
+        // Prefer playing in context of "All songs" queue
+        List<Song> all = library.getAllSongs();
+        int idx = -1;
+        for (int i = 0; i < all.size(); i++) {
+            if (song.getPath().equals(all.get(i).getPath())) {
+                idx = i;
+                break;
+            }
+        }
+
+        if (idx >= 0) playQueue(all, idx);
+        else {
+            ArrayList<Song> single = new ArrayList<>();
+            single.add(song);
+            playQueue(single, 0);
+        }
+    }
+
+    @Override
+    public void togglePlayPause() {
+        if (!serviceBound || musicService == null) return;
+        if (musicService.isPlaying()) musicService.pause();
+        else musicService.resume();
+    }
+
+    @Override
+    public void next() {
+        if (!serviceBound || musicService == null) return;
+        musicService.next();
+    }
+
+    @Override
+    public void previous() {
+        if (!serviceBound || musicService == null) return;
+        musicService.previous();
+    }
+
+    @Override
+    public Song getCurrentSong() {
+        return (serviceBound && musicService != null) ? musicService.getCurrentSong() : null;
+    }
+
+    @Override
+    public boolean isPlaying() {
+        return serviceBound && musicService != null && musicService.isPlaying();
+    }
+
+    /* ============================================================
+       MusicService.Callback
+       ============================================================ */
+
+    @Override
+    public void onSongChanged(Song song) {
+        if (song == null) return;
+
+        // Mini
+        miniPlayerTitle.setText(song.getTitle());
+        miniPlayerArtist.setText(song.getArtist());
+
+        // Full
+        if (playerSongTitle != null) playerSongTitle.setText(song.getTitle());
+        if (playerArtistName != null) playerArtistName.setText(song.getArtist());
+
+        showMiniPlayer();
+        syncQueueUI();
+    }
+
+    @Override
+    public void onPlaybackState(boolean playing) {
+        int icon = playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
+        miniPlayerPlayPause.setImageResource(icon);
+        if (playerBtnPlayPause != null) playerBtnPlayPause.setImageResource(icon);
+    }
+
+    private void bindViews() {
+        tabLayout = findViewById(R.id.tabLayout);
+        viewPager = findViewById(R.id.viewPager);
+
+
+        btnRefresh = findViewById(R.id.btnRefresh);
+        btnViewLogs = findViewById(R.id.btnViewLogs);
+
+        miniPlayer = findViewById(R.id.miniPlayer);
+        miniPlayerTitle = findViewById(R.id.miniPlayerTitle);
+        miniPlayerArtist = findViewById(R.id.miniPlayerArtist);
+        miniPlayerPlayPause = findViewById(R.id.miniPlayerPlayPause);
+        miniPlayerNext = findViewById(R.id.miniPlayerNext);
+        btnMinimize = findViewById(R.id.playerBtnMinimize);
+        if (btnMinimize != null) btnMinimize.setOnClickListener(v -> changePlayer(false));
+        bottomSheetPlayer = findViewById(R.id.bottomSheetPlayer);
+        if (bottomSheetPlayer == null) {
+            Log.e(TAG, "bottomSheetPlayer not found. Ensure bottom_sheet_player.xml root has android:id=\"@+id/bottomSheetPlayer\".");
+        }
+
+        playerSongTitle = findViewById(R.id.playerSongTitle);
+        playerArtistName = findViewById(R.id.playerArtistName);
+        playerBtnPrevious = findViewById(R.id.playerBtnPrevious);
+        playerBtnPlayPause = findViewById(R.id.playerBtnPlayPause);
+        playerBtnNext = findViewById(R.id.playerBtnNext);
+
+        // Optional (only if you add RecyclerView in layout)
+        playerQueue = findViewById(R.id.playerQueue);
     }
 
     private void setupTabs() {
-        try {
-            pagerAdapter = new MusicPagerAdapter(this);
-            viewPager.setAdapter(pagerAdapter);
+        MusicPagerAdapter pagerAdapter = new MusicPagerAdapter(this);
+        viewPager.setAdapter(pagerAdapter);
 
-            // Set default tab to "All" (index 2)
-            viewPager.setCurrentItem(2, false);
+        viewPager.setCurrentItem(Tab.ALL.ordinal(), false);
 
-            new TabLayoutMediator(tabLayout, viewPager,
-                    (tab, position) -> tab.setText(TAB_TITLES[position])
-            ).attach();
-
-            // CRITICAL: Set FavoritesManager on fragments after ViewPager creates them
-            viewPager.postDelayed(() -> {
-                Log.d(TAG, "Setting up fragments with managers");
-
-                try {
-                    AllSongsFragment allSongsFragment = (AllSongsFragment) pagerAdapter.getTab(ALL);
-                    if (allSongsFragment != null) {
-                        allSongsFragment.setFavoritesManager(favoritesManager);
-                        Log.d(TAG, "AllSongsFragment: FavoritesManager set");
-                    } else {
-                        Log.e(TAG, "AllSongsFragment is NULL!");
-                    }
-
-                    FavoritesFragment favoritesFragment = (FavoritesFragment) pagerAdapter.getTab(FAVORITES);
-                    if (favoritesFragment != null) {
-                        favoritesFragment.setFavoritesManager(favoritesManager);
-                        Log.d(TAG, "FavoritesFragment: FavoritesManager set");
-                    } else {
-                        Log.e(TAG, "FavoritesFragment is NULL!");
-                    }
-
-                    FoldersFragment foldersFragment = (FoldersFragment) pagerAdapter.getTab(FOLDERS);
-                    if (foldersFragment != null) {
-                        Log.d(TAG, "FoldersFragment: Ready");
-                    } else {
-                        Log.e(TAG, "FoldersFragment is NULL!");
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error setting up fragments: " + e.getMessage(), e);
-                }
-            }, 100);
-
-            Log.d(TAG, "Tabs setup successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "Error setting up tabs: " + e.getMessage(), e);
-            throw e;
-        }
+        new TabLayoutMediator(tabLayout, viewPager,
+                (tab, position) -> tab.setText(Tab.labels[position])
+        ).attach();
     }
 
     private void setupMiniPlayer() {
-        miniPlayer.setOnClickListener(v -> {
-            Toast.makeText(this, "Full player coming soon!", Toast.LENGTH_SHORT).show();
-        });
+        miniPlayer.setOnClickListener(v -> changePlayer(true));
+        miniPlayerPlayPause.setOnClickListener(v -> togglePlayPause());
+        miniPlayerNext.setOnClickListener(v -> next());
+    }
 
-        miniPlayerPlayPause.setOnClickListener(v -> {
-            if (serviceBound && musicService != null) {
-                if (musicService.isPlaying()) {
-                    musicService.pauseSong();
-                } else {
-                    musicService.resumeSong();
-                }
-            }
-        });
+    private void setupFullPlayer() {
+        if (bottomSheetPlayer == null) return;
 
-        miniPlayerNext.setOnClickListener(v -> {
-            if (serviceBound && musicService != null) {
-                musicService.playNext();
-            }
+        bottomSheetBehavior = BottomSheetBehavior.from(bottomSheetPlayer);
+        bottomSheetBehavior.setPeekHeight(dp(this,64));
+        bottomSheetBehavior.setHideable(false);
+        changePlayer(false); //start with hidden player
+
+
+        if (playerBtnPrevious != null) playerBtnPrevious.setOnClickListener(v -> previous());
+        if (playerBtnPlayPause != null) playerBtnPlayPause.setOnClickListener(v -> togglePlayPause());
+        if (playerBtnNext != null) playerBtnNext.setOnClickListener(v -> next());
+
+        if (playerQueue != null) {
+            playerQueue.setLayoutManager(new LinearLayoutManager(this));
+            queueAdapter = new QueueAdapter();
+            playerQueue.setAdapter(queueAdapter);
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(bottomSheetPlayer, (v, insets) -> {
+            Insets navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
+            v.setPadding(
+                    v.getPaddingLeft(),
+                    v.getPaddingTop(),
+                    v.getPaddingRight(),
+                    navBars.bottom
+            );
+            return insets;
         });
     }
 
@@ -259,207 +383,108 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        btnViewLogs.setOnClickListener(v -> {
-            Intent intent = new Intent(this, LogsActivity.class);
-            startActivity(intent);
-        });
+        btnViewLogs.setOnClickListener(v -> startActivity(new Intent(this, LogsActivity.class)));
 
         btnRefresh.setOnLongClickListener(v -> {
             cacheManager.clearCache();
             Toast.makeText(this, "Cache cleared!", Toast.LENGTH_SHORT).show();
-            if (checkPermissions()) {
-                loadSongs();
-            }
+            if (checkPermissions()) loadSongs();
             return true;
         });
     }
 
+    /* ============================================================
+       Repo changes
+       ============================================================ */
+
+    private void onRepositoryChanged() {
+        // Fragments should read from LibraryRepository in onResume/onViewCreated.
+        // We still keep player queue synced.
+        syncQueueUI();
+    }
+
+    /* ============================================================
+       Song loading
+       ============================================================ */
+
     private void loadSongs() {
         Log.d(TAG, "========== Starting to load songs ==========");
+
         if (cacheManager.hasCachedSongs()) {
             List<Song> cachedSongs = cacheManager.loadCachedSongs();
-            updateFragments(cachedSongs);
-
-            Log.d(TAG, "Loaded " + cachedSongs.size() + " songs from cache");
-            Toast.makeText(this,
-                    getString(R.string.toast_loaded_from_cache, cachedSongs.size()),
-                    Toast.LENGTH_SHORT).show();
+            library.initSongs(cachedSongs);
+            Toast.makeText(this, "Loaded " + cachedSongs.size() + " songs from cache", Toast.LENGTH_SHORT).show();
         }
 
-        Toast.makeText(this, R.string.toast_checking_new_songs, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Checking for new songs...", Toast.LENGTH_SHORT).show();
 
         new Thread(() -> {
             List<Song> scannedSongs = ManualFileScanner.scanForAudioFiles(this);
             SongCacheManager.ScanResult result = cacheManager.compareAndUpdate(scannedSongs);
 
             runOnUiThread(() -> {
-                updateFragments(result.getAllSongs());
+                List<Song> allSongs = result.getAllSongs();
+                library.initSongs(allSongs);
 
                 if (!result.hasChanges()) {
-                    Log.d(TAG, "No changes detected");
-                    Toast.makeText(this,
-                            getString(R.string.toast_library_up_to_date, result.getAllSongs().size()),
-                            Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Library is up to date (" + allSongs.size() + " songs)", Toast.LENGTH_SHORT).show();
                 } else {
                     int added = result.getAddedSongs().size();
                     int removed = result.getRemovedSongs().size();
-
-                    activityLogger.logLibraryScan(result.getAllSongs().size(), added, removed);
-
-                    StringBuilder message = new StringBuilder();
-                    if (added > 0) {
-                        message.append("Added ").append(added).append(" song").append(added > 1 ? "s" : "");
-                    }
-                    if (removed > 0) {
-                        if (message.length() > 0) message.append(", ");
-                        message.append("Removed ").append(removed).append(" song").append(removed > 1 ? "s" : "");
-                    }
-
+                    activityLogger.logLibraryScan(allSongs.size(), added, removed);
                     Toast.makeText(this,
-                            getString(R.string.toast_songs_added_removed, message.toString(), result.getAllSongs().size()),
+                            "Updated: +" + added + ", -" + removed + " (" + allSongs.size() + " total)",
                             Toast.LENGTH_LONG).show();
                 }
 
-                if (result.getAllSongs().isEmpty()) {
-                    Toast.makeText(this, R.string.toast_no_audio_files,
-                            Toast.LENGTH_LONG).show();
+                if (allSongs.isEmpty()) {
+                    Toast.makeText(this, "No audio files found", Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
 
-
         Log.d(TAG, "========== Finished loading songs ==========");
     }
 
-    private void updateFragments(List<Song> songs) {
-        try {
-            Log.d(TAG, "updateFragments called with " + songs.size() + " songs");
-
-            AllSongsFragment allSongsFragment = (AllSongsFragment) pagerAdapter.getTab(ALL);
-            if (allSongsFragment != null) {
-                allSongsFragment.setFavoritesManager(favoritesManager);
-                allSongsFragment.setSongList(songs);
-                Log.d(TAG, "AllSongsFragment updated with songs");
-            } else {
-                Log.e(TAG, "AllSongsFragment is NULL in updateFragments!");
-            }
-
-            FoldersFragment foldersFragment = (FoldersFragment) pagerAdapter.getTab(FOLDERS);
-            if (foldersFragment != null) {
-                foldersFragment.setSongList(songs);
-                Log.d(TAG, "FoldersFragment updated with songs");
-            } else {
-                Log.e(TAG, "FoldersFragment is NULL in updateFragments!");
-            }
-
-            updateFavoritesTab();
-        } catch (Exception e) {
-            Log.e(TAG, "Error updating fragments: " + e.getMessage(), e);
-        }
-    }
-
-    private void updateFavoritesTab() {
-        try {
-            List<Song> favoriteSongs = new ArrayList<>();
-
-            for (Song song : songList) {
-                if (favoritesManager.isFavorite(song.getPath())) {
-                    favoriteSongs.add(song);
-                }
-            }
-
-            FavoritesFragment favoritesFragment = (FavoritesFragment) pagerAdapter.getTab(FAVORITES);
-            if (favoritesFragment != null) {
-                favoritesFragment.updateFavorites(favoriteSongs);
-                Log.d(TAG, "Updated favorites tab with " + favoriteSongs.size() + " songs");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error updating favorites tab: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Play a song from a list at a specific position
-     * Called by fragments when user taps a song
-     */
-    public void playSong(List<Song> songs, int position) {
-        if (songs != null && !songs.isEmpty() && position >= 0 && position < songs.size()) {
-            Song selectedSong = songs.get(position);
-
-            activityLogger.logSongSelected(selectedSong, position);
-
-            Intent intent = new Intent(this, MusicService.class);
-            intent.setAction(MusicService.ACTION_PLAY);
-            startService(intent);
-
-            if (serviceBound && musicService != null) {
-                musicService.setSongList(new ArrayList<>(songs));
-                musicService.setActivityLogger(activityLogger);
-                musicService.playSong(position);
-            }
-
-            showMiniPlayer();
-        }
-    }
-
-    /**
-     * Get the current song list
-     * Used by fragments to access songs
-     */
-    public List<Song> getSongList() {
-        return songList != null ? new ArrayList<>(songList) : new ArrayList<>();
-    }
-
-    /**
-     * Get the FavoritesManager instance
-     * Used by fragments to manage favorites
-     */
-    public FavoritesManager getFavoritesManager() {
-        return favoritesManager;
-    }
-
-    /**
-     * Get the PlaylistManager instance
-     * Used by fragments to manage playlists
-     */
-    public PlaylistManager getPlaylistManager() {
-        return playlistManager;
-    }
+    /* ============================================================
+       Bottom sheet helpers
+       ============================================================ */
 
     private void showMiniPlayer() {
-        miniPlayer.setVisibility(View.VISIBLE);
+        if (miniPlayer != null) miniPlayer.setVisibility(View.VISIBLE);
     }
 
-    private void updateUI(Song song) {
-        if (song != null) {
-            miniPlayerTitle.setText(song.getTitle());
-            miniPlayerArtist.setText(song.getArtist());
+    private void changePlayer(boolean toExpend) {
+        if (bottomSheetBehavior == null) return;
+        bottomSheetBehavior.setState(toExpend ? BottomSheetBehavior.STATE_EXPANDED : BottomSheetBehavior.STATE_COLLAPSED);
+        if (!toExpend){
+            btnMinimize.setVisibility(View.GONE);
+            btnMinimize.setActivated(false);
+        } else {
+            btnMinimize.setVisibility(View.VISIBLE);
+            btnMinimize.setActivated(true);
         }
     }
 
-    private void updatePlayPauseButtons(boolean isPlaying) {
-        int icon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
-        miniPlayerPlayPause.setImageResource(icon);
+    private void syncQueueUI() {
+        if (!serviceBound || musicService == null || queueAdapter == null) return;
+        queueAdapter.submit(musicService.getQueue(), musicService.getCurrentIndex());
     }
+
+    /* ============================================================
+       Permissions
+       ============================================================ */
 
     private boolean checkPermissions() {
-        boolean hasPermission;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasPermission = ContextCompat.checkSelfPermission(this,
-                    Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
-            Log.d(TAG, "Android 13+ - READ_MEDIA_AUDIO permission: " +
-                    (hasPermission ? "GRANTED" : "DENIED"));
-        } else {
-            hasPermission = ContextCompat.checkSelfPermission(this,
-                    Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
-            Log.d(TAG, "Android 12 or below - READ_EXTERNAL_STORAGE permission: " +
-                    (hasPermission ? "GRANTED" : "DENIED"));
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED;
         }
-        return hasPermission;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     private void requestPermissions() {
-        Log.d(TAG, "Requesting permissions...");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.READ_MEDIA_AUDIO},
@@ -477,21 +502,21 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Log.d(TAG, "Permission GRANTED by user");
                 loadSongs();
             } else {
-                Log.e(TAG, "Permission DENIED by user");
-                Toast.makeText(this, "Permission denied - cannot load songs",
-                        Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Permission denied - cannot load songs", Toast.LENGTH_LONG).show();
             }
         }
     }
 
+    /* ============================================================
+       Lifecycle
+       ============================================================ */
+
     @Override
     protected void onStart() {
         super.onStart();
-        Intent intent = new Intent(this, MusicService.class);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+        bindService(new Intent(this, MusicService.class), serviceConnection, Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -506,8 +531,63 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (activityLogger != null) {
-            activityLogger.logAppClosed();
+        if (library != null) library.removeListener(repoListener);
+        if (activityLogger != null) activityLogger.logAppClosed();
+    }
+
+
+
+    /* ============================================================
+       Internal queue adapter (no extra class file needed)
+       ============================================================ */
+
+    private final class QueueAdapter extends RecyclerView.Adapter<QueueAdapter.VH> {
+        private final List<Song> items = new ArrayList<>();
+        private int currentIndex = -1;
+
+        void submit(List<Song> queue, int idx) {
+            items.clear();
+            if (queue != null) items.addAll(queue);
+            currentIndex = idx;
+            notifyDataSetChanged();
+        }
+
+        @NonNull
+        @Override
+        public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View v = LayoutInflater.from(parent.getContext())
+                    .inflate(android.R.layout.simple_list_item_2, parent, false);
+            return new VH(v);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull VH holder, int position) {
+            Song s = items.get(position);
+            holder.title.setText(s.getTitle());
+            holder.subtitle.setText(s.getArtist());
+
+            holder.itemView.setAlpha(position == currentIndex ? 1.0f : 0.6f);
+
+            holder.itemView.setOnClickListener(v -> {
+                if (!serviceBound || musicService == null) return;
+                musicService.playAt(position);
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return items.size();
+        }
+
+        final class VH extends RecyclerView.ViewHolder {
+            final TextView title;
+            final TextView subtitle;
+
+            VH(@NonNull View itemView) {
+                super(itemView);
+                title = itemView.findViewById(android.R.id.text1);
+                subtitle = itemView.findViewById(android.R.id.text2);
+            }
         }
     }
 }

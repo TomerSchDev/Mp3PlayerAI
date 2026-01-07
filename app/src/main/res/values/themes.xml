@@ -5,5 +5,5 @@
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
     </style>
 
-    <style name="Theme.Mp3PlayerAI" parent="Base.Theme.Mp3PlayerAI" />
+    <style name="Theme.Mp3PlayerAI" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
 </resources>

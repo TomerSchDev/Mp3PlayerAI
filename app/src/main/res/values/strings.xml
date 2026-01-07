@@ -66,7 +66,14 @@
         <string name="placeholder_playlists">Playlists\n\nComing Soon!</string>
         <string name="placeholder_folders">Folders\n\nComing Soon!</string>
         <string name="placeholder_custom">Custom\n\nComing Soon!</string>
-
+        <string name="content_desc_add_to_playlist">Add to Playlist</string>
+        <string name="dialog_add_to_playlist_title">Add "%s" to playlist</string>
+        <string name="dialog_remove_from_playlist_title">Remove from Playlist?</string>
+        <string name="dialog_remove_from_playlist_message">Remove "%1$s" from "%2$s"?</string>
+        <string name="dialog_remove">Remove</string>
+        <string name="toast_no_playlists_create_first">No playlists yet. Create a playlist first!</string>
+        <string name="toast_song_added_to_playlist">"%1$s" added to "%2$s"</string>
+        <string name="toast_song_removed_from_playlist">"%1$s" removed from "%2$s"</string>
         <!-- Activity Logs -->
         <string name="logs_title">Activity Logs</string>
         <string name="logs_statistics_title">LISTENING STATISTICS</string>

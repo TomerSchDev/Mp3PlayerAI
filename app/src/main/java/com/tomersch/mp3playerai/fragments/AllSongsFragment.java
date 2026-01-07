@@ -1,6 +1,8 @@
 package com.tomersch.mp3playerai.fragments;
 
+import android.content.Context;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,13 +16,16 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.SongAdapter;
 import com.tomersch.mp3playerai.models.Song;
-import com.tomersch.mp3playerai.utils.FavoritesManager;
+import com.tomersch.mp3playerai.player.LibraryProvider;
+import com.tomersch.mp3playerai.player.PlayerController;
+import com.tomersch.mp3playerai.utils.LibraryRepository;
+import com.tomersch.mp3playerai.utils.PlaylistDialogHelper;
 
-import android.util.Log;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Fragment for All Songs tab
+ * All Songs tab - reads from LibraryRepository, controls playback via PlayerController.
  */
 public class AllSongsFragment extends Fragment {
 
@@ -28,82 +33,91 @@ public class AllSongsFragment extends Fragment {
 
     private RecyclerView recyclerView;
     private SongAdapter songAdapter;
-    private List<Song> songList;
-    private FavoritesManager favoritesManager;
 
-    private static AllSongsFragment allSongsFragment;
+    private PlayerController playerController;
+    private LibraryRepository repo;
 
-    private AllSongsFragment (){};
-    public static AllSongsFragment getInstance()
-    {
-        if (allSongsFragment == null)
-        {
-            allSongsFragment = new AllSongsFragment();
-        }
-        return allSongsFragment;
+    private List<Song> songList = new ArrayList<>();
+
+    public AllSongsFragment() {}
+
+    public static AllSongsFragment newInstance() {
+        return new AllSongsFragment();
     }
 
-    private final SongAdapter.OnSongClickListener clickListener = ( position) -> {
-        // Call MainActivity's playSong method
-        ((com.tomersch.mp3playerai.activities.MainActivity) getActivity()).playSong(songList, position);
-    };
+    @Override
+    public void onAttach(@NonNull Context context) {
+        super.onAttach(context);
+
+        if (context instanceof PlayerController) {
+            playerController = (PlayerController) context;
+        } else {
+            throw new IllegalStateException("Host activity must implement PlayerController");
+        }
+
+        if (context instanceof LibraryProvider) {
+            repo = ((LibraryProvider) context).getLibraryRepository();
+        } else {
+            throw new IllegalStateException("Host activity must implement LibraryProvider");
+        }
+    }
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
-                             @Nullable Bundle savedInstanceState) {
+    public View onCreateView(
+            @NonNull LayoutInflater inflater,
+            @Nullable ViewGroup container,
+            @Nullable Bundle savedInstanceState
+    ) {
         View view = inflater.inflate(R.layout.fragment_all_songs, container, false);
 
-        // Use the correct ID from your layout
         recyclerView = view.findViewById(R.id.rvAllSongs);
-
         if (recyclerView == null) {
-            Log.e(TAG, "ERROR: RecyclerView with id 'rvAllSongs' not found in layout!");
+            Log.e(TAG, "RecyclerView with id 'rvAllSongs' not found in layout!");
             return view;
         }
 
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
 
-        if (songList != null) {
-            songAdapter = new SongAdapter(songList, clickListener);
-            if (favoritesManager != null) {
-                Log.d(TAG, "Setting FavoritesManager in adapter");
-                songAdapter.setFavoritesManager(favoritesManager);
-            } else {
-                Log.w(TAG, "FavoritesManager is null in onCreateView");
-            }
-            recyclerView.setAdapter(songAdapter);
-        }
+        // Initial data
+        songList = repo != null ? repo.getAllSongs() : new ArrayList<>();
 
+        // Click -> play queue
+        SongAdapter.OnSongClickListener clickListener = (position) -> {
+            if (playerController == null) return;
+            if (songList == null || songList.isEmpty()) return;
+            if (position < 0 || position >= songList.size()) return;
+            playerController.playQueue(songList, position);
+        };
+
+        songAdapter = new SongAdapter(songList, clickListener);
+        songAdapter.setRepository(repo);
+        songAdapter.setOnAddToPlaylistListener(song ->
+                        PlaylistDialogHelper.showAddToPlaylistDialog(getContext(), song, repo));
+
+
+        recyclerView.setAdapter(songAdapter);
         return view;
     }
 
-    /**
-     * Set FavoritesManager - called from MainActivity
-     */
-    public void setFavoritesManager(FavoritesManager manager) {
-        Log.d(TAG, "setFavoritesManager called, manager is " + (manager != null ? "not null" : "null"));
-        this.favoritesManager = manager;
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshFromRepository();
+    }
+
+    private void refreshFromRepository() {
+        if (repo == null) return;
+
+        List<Song> updated = repo.getAllSongs();
+        if (updated == null) updated = new ArrayList<>();
+
+        songList = updated;
+
         if (songAdapter != null) {
-            songAdapter.setFavoritesManager(manager);
+            // simplest safe refresh (works with any adapter)
+            songAdapter.updateSongs(songList); // <-- you likely don't have this yet
+            // If you don't have updateSongs(...), use the fallback below.
         }
-    }
-
-    /**
-     * Set the song list
-     */
-    public void setSongList(List<Song> songs) {
-        this.songList = songs;
-        if (songAdapter != null && recyclerView != null) {
-            songAdapter = new SongAdapter(songList, clickListener);
-            if (favoritesManager != null) {
-                songAdapter.setFavoritesManager(favoritesManager);
-            }
-            recyclerView.setAdapter(songAdapter);
-        }
-    }
-
-    public static AllSongsFragment newInstance() {
-        return new AllSongsFragment();
     }
 }

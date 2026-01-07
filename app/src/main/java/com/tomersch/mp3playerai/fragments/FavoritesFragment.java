@@ -1,6 +1,8 @@
 package com.tomersch.mp3playerai.fragments;
 
+import android.content.Context;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -15,15 +17,16 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.SongAdapter;
 import com.tomersch.mp3playerai.models.Song;
-import com.tomersch.mp3playerai.utils.FavoritesManager;
+import com.tomersch.mp3playerai.player.LibraryProvider;
+import com.tomersch.mp3playerai.player.PlayerController;
+import com.tomersch.mp3playerai.utils.LibraryRepository;
+import com.tomersch.mp3playerai.utils.PlaylistDialogHelper;
 
-import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
- * Fragment to display favorite songs
+ * Favorites tab - reads from LibraryRepository, plays via PlayerController.
  */
 public class FavoritesFragment extends Fragment {
 
@@ -32,104 +35,122 @@ public class FavoritesFragment extends Fragment {
     private RecyclerView recyclerView;
     private TextView tvEmptyState;
     private SongAdapter songAdapter;
-    private List<Song> favoritesList;
-    private FavoritesManager favoritesManager;
-    private static FavoritesFragment favoritesFragment;
-    public static FavoritesFragment getInstance() {
-        if (favoritesFragment == null) {
-            favoritesFragment = new FavoritesFragment();
-        }
-        return favoritesFragment;
+
+    private PlayerController playerController;
+    private LibraryRepository repo;
+
+    private List<Song> favoritesList = new ArrayList<>();
+
+    // Keep a reference so removeListener() removes the same instance
+    private final Runnable repoListener = this::refreshFromRepository;
+
+    public FavoritesFragment() {}
+
+    public static FavoritesFragment newInstance() {
+        return new FavoritesFragment();
     }
-    private FavoritesFragment() {};
-    private final SongAdapter.OnSongClickListener clickListener = ( position) -> {
-        // Call MainActivity's playSong method
-        ((com.tomersch.mp3playerai.activities.MainActivity) Objects.requireNonNull(getActivity())).playSong(favoritesList, position);
-    };
+
+    @Override
+    public void onAttach(@NonNull Context context) {
+        super.onAttach(context);
+
+        if (context instanceof PlayerController) {
+            playerController = (PlayerController) context;
+        } else {
+            throw new IllegalStateException("Host activity must implement PlayerController");
+        }
+
+        if (context instanceof LibraryProvider) {
+            repo = ((LibraryProvider) context).getLibraryRepository();
+        } else {
+            throw new IllegalStateException("Host activity must implement LibraryProvider");
+        }
+    }
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
-                             @Nullable Bundle savedInstanceState) {
+    public View onCreateView(
+            @NonNull LayoutInflater inflater,
+            @Nullable ViewGroup container,
+            @Nullable Bundle savedInstanceState
+    ) {
         View view = inflater.inflate(R.layout.fragment_favorites, container, false);
 
-        // Use the correct IDs from your layout
         recyclerView = view.findViewById(R.id.rvFavorite);
         tvEmptyState = view.findViewById(R.id.tvEVFavorite);
 
-        // Critical null check BEFORE using recyclerView
         if (recyclerView == null) {
-            Log.e(TAG, "ERROR: RecyclerView with id 'rvFavorite' not found in layout!");
+            Log.e(TAG, "RecyclerView with id 'rvFavorite' not found in layout!");
             return view;
-        }
-
-        if (tvEmptyState == null) {
-            Log.e(TAG, "ERROR: TextView with id 'tvEVFavorite' not found in layout!");
         }
 
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
 
-        // Initialize favorites list as empty
-        favoritesList = new ArrayList<>();
+        // Initial load
+        favoritesList = (repo != null) ? repo.getFavoriteSongs() : new ArrayList<>();
+
+        SongAdapter.OnSongClickListener clickListener = (position) -> {
+            if (playerController == null) return;
+            if (favoritesList == null || favoritesList.isEmpty()) return;
+            if (position < 0 || position >= favoritesList.size()) return;
+            playerController.playQueue(favoritesList, position);
+        };
 
         songAdapter = new SongAdapter(favoritesList, clickListener);
-        if (favoritesManager != null) {
-            songAdapter.setFavoritesManager(favoritesManager);
-        }
+
+        // Key: connect adapter to repository for favorite toggles
+        songAdapter.setRepository(repo);
+
+        // Add-to-playlist
+        songAdapter.setOnAddToPlaylistListener(song -> {
+            if (getContext() == null || repo == null) return;
+            PlaylistDialogHelper.showAddToPlaylistDialog(getContext(), song, repo);
+        });
+
         recyclerView.setAdapter(songAdapter);
 
         updateEmptyState();
-
         return view;
     }
 
-    /**
-     * Set FavoritesManager - called from MainActivity
-     */
-    public void setFavoritesManager(FavoritesManager manager) {
-        Log.d(TAG, "setFavoritesManager called, manager is " + (manager != null ? "not null" : "null"));
-        this.favoritesManager = manager;
-        if (songAdapter != null) {
-            songAdapter.setFavoritesManager(manager);
-        }
+    @Override
+    public void onStart() {
+        super.onStart();
+        if (repo != null) repo.addListener(repoListener);
     }
 
-    /**
-     * Update the list with favorite songs
-     */
-    public void updateFavorites(List<Song> favorites) {
-        Log.d(TAG, "updateFavorites called with " + (favorites != null ? favorites.size() : 0) + " songs");
-        if (favoritesList == null) {
-            favoritesList = new ArrayList<>();
-        }
-        favoritesList.clear();
-        if (favorites != null) {
-            favoritesList.addAll(favorites);
-        }
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (repo != null) repo.removeListener(repoListener);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshFromRepository();
+    }
+
+    private void refreshFromRepository() {
+        if (repo == null) return;
+
+        List<Song> updated = repo.getFavoriteSongs();
+        if (updated == null) updated = new ArrayList<>();
+
+        favoritesList = updated;
+
         if (songAdapter != null) {
-            songAdapter.notifyDataSetChanged();
+            songAdapter.updateSongs(favoritesList);
         }
+
         updateEmptyState();
     }
 
-    /**
-     * Show/hide empty state based on favorites list
-     */
     private void updateEmptyState() {
-        if (tvEmptyState == null || recyclerView == null) {
-            return;
-        }
+        if (tvEmptyState == null || recyclerView == null) return;
 
-        if (favoritesList == null || favoritesList.isEmpty()) {
-            tvEmptyState.setVisibility(View.VISIBLE);
-            recyclerView.setVisibility(View.GONE);
-        } else {
-            tvEmptyState.setVisibility(View.GONE);
-            recyclerView.setVisibility(View.VISIBLE);
-        }
-    }
-
-    public static FavoritesFragment newInstance() {
-        return new FavoritesFragment();
+        boolean empty = (favoritesList == null || favoritesList.isEmpty());
+        tvEmptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
+        recyclerView.setVisibility(empty ? View.GONE : View.VISIBLE);
     }
 }

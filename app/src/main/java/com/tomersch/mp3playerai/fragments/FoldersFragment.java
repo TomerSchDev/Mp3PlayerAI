@@ -1,5 +1,6 @@
 package com.tomersch.mp3playerai.fragments;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -13,10 +14,11 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.tomersch.mp3playerai.R;
-import com.tomersch.mp3playerai.activities.MainActivity;
 import com.tomersch.mp3playerai.adapters.FolderAdapter;
 import com.tomersch.mp3playerai.models.MusicFolder;
 import com.tomersch.mp3playerai.models.Song;
+import com.tomersch.mp3playerai.player.LibraryProvider;
+import com.tomersch.mp3playerai.utils.LibraryRepository;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,79 +26,97 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Fragment for Folders tab
+ * Folders tab - reads from LibraryRepository, plays via PlayerController.
  */
 public class FoldersFragment extends Fragment {
 
     private RecyclerView recyclerView;
     private TextView tvEmptyState;
-    private FolderAdapter folderAdapter;
-    private List<Song> songList;
+
+    private LibraryRepository repo;
+
+    private List<Song> allSongs = new ArrayList<>();
+
+    // Keep reference so removeListener removes same instance
+    private final Runnable repoListener = this::refreshFromRepository;
+
+    public FoldersFragment() {}
 
     public static FoldersFragment newInstance() {
-        if (foldersFragment == null) {
-            foldersFragment = new FoldersFragment();
-        }
-        return foldersFragment;
+        return new FoldersFragment();
     }
-    private FoldersFragment() {};
-    private static FoldersFragment foldersFragment;
+
+    @Override
+    public void onAttach(@NonNull Context context) {
+        super.onAttach(context);
+
+
+        if (context instanceof LibraryProvider) {
+            repo = ((LibraryProvider) context).getLibraryRepository();
+        } else {
+            throw new IllegalStateException("Host activity must implement LibraryProvider");
+        }
+    }
+
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
-                             @Nullable Bundle savedInstanceState) {
+    public View onCreateView(
+            @NonNull LayoutInflater inflater,
+            @Nullable ViewGroup container,
+            @Nullable Bundle savedInstanceState
+    ) {
         View view = inflater.inflate(R.layout.fragment_folders, container, false);
 
-        // Use the correct IDs from your layout
         recyclerView = view.findViewById(R.id.rvFolders);
         tvEmptyState = view.findViewById(R.id.tvESFolders);
 
-        if (recyclerView == null) {
-            return view;
-        }
+        if (recyclerView == null) return view;
 
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
 
-        if (songList != null) {
-            List<MusicFolder> folderItems = groupSongsByFolder(songList);
-            if (folderItems.isEmpty()) {
-                if (tvEmptyState != null) {
-                    tvEmptyState.setVisibility(View.VISIBLE);
-                }
-                recyclerView.setVisibility(View.GONE);
-            } else {
-                if (tvEmptyState != null) {
-                    tvEmptyState.setVisibility(View.GONE);
-                }
-                recyclerView.setVisibility(View.VISIBLE);
-                folderAdapter = new FolderAdapter(folderItems, this::onFolderClick);
-                recyclerView.setAdapter(folderAdapter);
-            }
-        }
+        // Initial load
+        allSongs = (repo != null) ? repo.getAllSongs() : new ArrayList<>();
+        renderFolders(allSongs);
 
         return view;
     }
 
-    /**
-     * Set the song list
-     */
-    public void setSongList(List<Song> songs) {
-        this.songList = songs;
-        if (recyclerView != null) {
-            List<MusicFolder> folderItems = groupSongsByFolder(songs);
-            if (folderItems.isEmpty()) {
-                if (tvEmptyState != null) {
-                    tvEmptyState.setVisibility(View.VISIBLE);
-                }
-                recyclerView.setVisibility(View.GONE);
-            } else {
-                if (tvEmptyState != null) {
-                    tvEmptyState.setVisibility(View.GONE);
-                }
-                recyclerView.setVisibility(View.VISIBLE);
-                folderAdapter = new FolderAdapter(folderItems, this::onFolderClick);
-                recyclerView.setAdapter(folderAdapter);
-            }
+    @Override
+    public void onStart() {
+        super.onStart();
+        if (repo != null) repo.addListener(repoListener);
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (repo != null) repo.removeListener(repoListener);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshFromRepository();
+    }
+
+    private void refreshFromRepository() {
+        if (repo == null) return;
+        allSongs = repo.getAllSongs();
+        if (allSongs == null) allSongs = new ArrayList<>();
+        renderFolders(allSongs);
+    }
+
+    private void renderFolders(List<Song> songs) {
+        if (recyclerView == null) return;
+
+        List<MusicFolder> folderItems = groupSongsByFolder(songs);
+
+        boolean empty = folderItems.isEmpty();
+        if (tvEmptyState != null) tvEmptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
+        recyclerView.setVisibility(empty ? View.GONE : View.VISIBLE);
+
+        if (!empty) {
+            recyclerView.setAdapter(new FolderAdapter(folderItems, this::onFolderClick));
         }
     }
 
@@ -108,19 +128,22 @@ public class FoldersFragment extends Fragment {
 
         for (Song song : songs) {
             String path = song.getPath();
-            String folderPath = path.substring(0, path.lastIndexOf("/"));
-            String folderName = folderPath.substring(folderPath.lastIndexOf("/") + 1);
+            if (path == null) continue;
+            int lastSlash = path.lastIndexOf("/");
+            if (lastSlash <= 0) continue;
+            String folderPath = path.substring(0, lastSlash);
 
             if (!folderMap.containsKey(folderPath)) {
                 folderMap.put(folderPath, new ArrayList<>());
             }
-            folderMap.get(folderPath).add(song);
+            folderMap.computeIfAbsent(folderPath, k -> new ArrayList<>()).add(song);
         }
-
         List<MusicFolder> folderItems = new ArrayList<>();
         for (Map.Entry<String, List<Song>> entry : folderMap.entrySet()) {
             String folderPath = entry.getKey();
-            String folderName = folderPath.substring(folderPath.lastIndexOf("/") + 1);
+            int lastSlash = folderPath.lastIndexOf("/");
+            String folderName = (lastSlash >= 0) ? folderPath.substring(lastSlash + 1) : folderPath;
+
             List<Song> songsInFolder = entry.getValue();
             folderItems.add(new MusicFolder(folderName, folderPath, songsInFolder.size()));
         }
@@ -132,27 +155,29 @@ public class FoldersFragment extends Fragment {
      * Handle folder click
      */
     private void onFolderClick(MusicFolder musicFolder) {
-        // Filter songs that belong to this folder
+        if (musicFolder == null || allSongs == null) return;
+
+        // Filter songs in this folder
         List<Song> songsInFolder = new ArrayList<>();
-        for (Song song : songList) {
-            String songFolderPath = song.getPath().substring(0, song.getPath().lastIndexOf("/"));
+        for (Song song : allSongs) {
+            String path = song.getPath();
+            int lastSlash = path.lastIndexOf("/");
+            if (lastSlash <= 0) continue;
+
+            String songFolderPath = path.substring(0, lastSlash);
             if (songFolderPath.equals(musicFolder.getFolderPath())) {
                 songsInFolder.add(song);
             }
         }
 
-        // Create subtitle showing song count
-        String subtitle = songsInFolder.size() + " song" +
-                (songsInFolder.size() != 1 ? "s" : "");
+        String subtitle = songsInFolder.size() + " song" + (songsInFolder.size() != 1 ? "s" : "");
 
-        // Use ListContainerFragment to show songs in this folder
         ListContainerFragment containerFragment = ListContainerFragment.newInstance(
                 new ArrayList<>(songsInFolder),
                 musicFolder.getFolderName(),
                 subtitle
         );
 
-        // Use child fragment manager to add to the folder_container
         getChildFragmentManager().beginTransaction()
                 .replace(R.id.folder_container, containerFragment)
                 .addToBackStack(null)

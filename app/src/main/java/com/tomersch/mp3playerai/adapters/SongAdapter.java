@@ -12,7 +12,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.models.Song;
-import com.tomersch.mp3playerai.utils.FavoritesManager;
+import com.tomersch.mp3playerai.utils.LibraryRepository;
 
 import java.util.List;
 import java.util.Locale;
@@ -20,12 +20,21 @@ import java.util.Locale;
 public class SongAdapter extends RecyclerView.Adapter<SongAdapter.SongViewHolder> {
 
     private static final String TAG = "SongAdapter";
-    private List<Song> songList;
-    private OnSongClickListener listener;
-    private FavoritesManager favoritesManager;
+
+    private final List<Song> songList;
+    private final OnSongClickListener listener;
+
+    private OnAddToPlaylistListener addToPlaylistListener;
+
+    // NEW: single source of truth
+    private LibraryRepository repo;
 
     public interface OnSongClickListener {
         void onSongClick(int position);
+    }
+
+    public interface OnAddToPlaylistListener {
+        void onAddToPlaylist(Song song);
     }
 
     public SongAdapter(List<Song> songList, OnSongClickListener listener) {
@@ -33,8 +42,13 @@ public class SongAdapter extends RecyclerView.Adapter<SongAdapter.SongViewHolder
         this.listener = listener;
     }
 
-    public void setFavoritesManager(FavoritesManager favoritesManager) {
-        this.favoritesManager = favoritesManager;
+    public void setRepository(LibraryRepository repo) {
+        this.repo = repo;
+        notifyDataSetChanged();
+    }
+
+    public void setOnAddToPlaylistListener(OnAddToPlaylistListener listener) {
+        this.addToPlaylistListener = listener;
     }
 
     @NonNull
@@ -56,11 +70,18 @@ public class SongAdapter extends RecyclerView.Adapter<SongAdapter.SongViewHolder
         return songList.size();
     }
 
+    public void updateSongs(List<Song> newSongs) {
+        songList.clear();
+        if (newSongs != null) songList.addAll(newSongs);
+        notifyDataSetChanged();
+    }
+
     class SongViewHolder extends RecyclerView.ViewHolder {
         TextView tvTitle;
         TextView tvArtist;
         TextView tvDuration;
         ImageButton btnFavorite;
+        ImageButton btnAddToPlaylist;
 
         public SongViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -68,6 +89,7 @@ public class SongAdapter extends RecyclerView.Adapter<SongAdapter.SongViewHolder
             tvArtist = itemView.findViewById(R.id.tvArtist);
             tvDuration = itemView.findViewById(R.id.tvDuration);
             btnFavorite = itemView.findViewById(R.id.btnFavorite);
+            btnAddToPlaylist = itemView.findViewById(R.id.btnAddToPlaylist);
         }
 
         public void bind(Song song, int position) {
@@ -75,50 +97,49 @@ public class SongAdapter extends RecyclerView.Adapter<SongAdapter.SongViewHolder
             tvArtist.setText(song.getArtist());
             tvDuration.setText(formatTime((int) song.getDuration()));
 
-            Log.d(TAG, "Binding song: " + song.getTitle() + ", favoritesManager: " + (favoritesManager != null ? "exists" : "NULL"));
+            Log.d(TAG, "Binding song: " + song.getTitle() + ", repo: " + (repo != null ? "exists" : "NULL"));
 
-            // Update heart icon based on favorite status
             updateFavoriteIcon(song);
 
-            // Click on song (but not on favorite button)
+            // Song click
             itemView.setOnClickListener(v -> {
-                if (listener != null) {
-                    listener.onSongClick(position);
-                }
+                if (listener != null) listener.onSongClick(position);
             });
 
-            // Make sure button doesn't trigger parent click
+            // Ensure buttons don’t trigger parent click
             btnFavorite.setClickable(true);
             btnFavorite.setFocusable(true);
+            btnAddToPlaylist.setClickable(true);
+            btnAddToPlaylist.setFocusable(true);
 
-            // Click on favorite button - remove any previous listeners first
+            // Favorite click
             btnFavorite.setOnClickListener(v -> {
-                Log.d(TAG, "Favorite button clicked for: " + song.getTitle());
-
-                if (favoritesManager == null) {
-                    Log.e(TAG, "FavoritesManager is NULL! Cannot toggle favorite.");
+                if (repo == null) {
+                    Log.e(TAG, "LibraryRepository is NULL! Cannot toggle favorite.");
                     return;
                 }
-                boolean isFavorite = favoritesManager.toggleFavorite(song.getPath());
-                Log.d(TAG, "Toggled favorite to: " + isFavorite);
+                boolean nowFav = repo.toggleFavorite(song);
+                Log.d(TAG, "Toggled favorite to: " + nowFav);
                 updateFavoriteIcon(song);
+            });
+
+            // Add to playlist
+            btnAddToPlaylist.setOnClickListener(v -> {
+                if (addToPlaylistListener != null) addToPlaylistListener.onAddToPlaylist(song);
             });
         }
 
         private void updateFavoriteIcon(Song song) {
-            if (favoritesManager != null && favoritesManager.isFavorite(song.getPath())) {
-                // Filled heart for favorites
-                btnFavorite.setImageResource(android.R.drawable.btn_star_big_on);
-            } else {
-                // Empty heart for non-favorites
-                btnFavorite.setImageResource(android.R.drawable.btn_star_big_off);
-            }
+            boolean isFav = repo != null && repo.isFavorite(song);
+            btnFavorite.setImageResource(isFav
+                    ? android.R.drawable.btn_star_big_on
+                    : android.R.drawable.btn_star_big_off);
         }
 
         private String formatTime(int milliseconds) {
             int seconds = (milliseconds / 1000) % 60;
             int minutes = (milliseconds / (1000 * 60)) % 60;
-            return String.format(Locale.ROOT,"%02d:%02d", minutes, seconds);
+            return String.format(Locale.ROOT, "%02d:%02d", minutes, seconds);
         }
     }
 }

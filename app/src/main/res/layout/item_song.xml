@@ -59,6 +59,19 @@
         android:layout_gravity="center_vertical"
         android:layout_marginStart="16dp" />
 
+    <!-- Add to Playlist Button -->
+    <ImageButton
+        android:id="@+id/btnAddToPlaylist"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@android:drawable/ic_menu_add"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/content_desc_add_to_playlist"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="8dp"
+        android:clickable="true"
+        android:focusable="true" />
+
     <!-- Favorite Button -->
     <ImageButton
         android:id="@+id/btnFavorite"
