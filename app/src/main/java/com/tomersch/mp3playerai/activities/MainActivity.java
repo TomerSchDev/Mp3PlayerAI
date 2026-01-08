@@ -21,6 +21,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -41,9 +42,9 @@ import com.tomersch.mp3playerai.models.Song;
 import com.tomersch.mp3playerai.models.Tab;
 import com.tomersch.mp3playerai.player.LibraryProvider;
 import com.tomersch.mp3playerai.player.PlayerController;
+import com.tomersch.mp3playerai.services.MusicService;
 import com.tomersch.mp3playerai.utils.LibraryRepository;
 import com.tomersch.mp3playerai.utils.ManualFileScanner;
-import com.tomersch.mp3playerai.utils.MusicService;
 import com.tomersch.mp3playerai.utils.SongCacheManager;
 import com.tomersch.mp3playerai.utils.UserActivityLogger;
 
@@ -51,21 +52,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MainActivity
+ * MainActivity - Enhanced with AI Continue Mode
  * - owns UI (tabs + mini player + bottom sheet full player)
  * - owns scanning + initializes LibraryRepository
  * - binds to MusicService and implements PlayerController
+ * - 🤖 NEW: AI Continue mode controls and status display
  */
 public class MainActivity extends AppCompatActivity
-        implements PlayerController, LibraryProvider, MusicService.Callback {
+        implements PlayerController, LibraryProvider, MusicService.Callback,
+        MusicService.PlaybackListener {
 
     private static final String TAG = "MP3Player";
-    //private final boolean DEBUG = true;
+    private final boolean DEBUG = false;
 
     private static final int PERMISSION_REQUEST_CODE = 100;
 
-
-    //new PlayList Button
     // Tabs
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
@@ -92,6 +93,12 @@ public class MainActivity extends AppCompatActivity
     private ImageButton playerBtnNext;
     private ImageButton btnMinimize;
 
+    // 🤖 NEW: AI Continue Mode UI
+    private ImageButton playerBtnPlaybackMode;
+    private LinearLayout layoutAiStatus;
+    private TextView tvAiStatus;
+    private ImageButton btnAiSettings;
+
     // Optional queue list in full player
     private RecyclerView playerQueue;
     private QueueAdapter queueAdapter;
@@ -117,10 +124,17 @@ public class MainActivity extends AppCompatActivity
         public void onServiceConnected(ComponentName name, IBinder service) {
             MusicService.MusicBinder binder = (MusicService.MusicBinder) service;
             musicService = binder.getService();
+            List<Song> allSongs = (library != null) ? library.getAllSongs() : null;
+            if (allSongs != null && !allSongs.isEmpty()) {
+                musicService.setAvailableSongs(allSongs);
+            }
             serviceBound = true;
 
             musicService.setCallback(MainActivity.this);
             musicService.setActivityLogger(activityLogger);
+
+            // 🤖 NEW: Register for AI Continue updates
+            musicService.addListener(MainActivity.this);
 
             // Apply pending request
             if (pendingQueue != null && pendingIndex >= 0) {
@@ -137,6 +151,9 @@ public class MainActivity extends AppCompatActivity
                 showMiniPlayer();
                 syncQueueUI();
             }
+
+            // 🤖 NEW: Initialize AI mode UI
+            updatePlaybackModeUI(musicService.getPlaybackMode());
         }
 
         @Override
@@ -153,7 +170,7 @@ public class MainActivity extends AppCompatActivity
         new Thread(() -> {
             try {
                 // Get all songs from device
-                List<Song> allSongs = library.getAllSongs(); // Your existing method
+                List<Song> allSongs = library.getAllSongs();
 
                 if (allSongs == null || allSongs.isEmpty()) {
                     Log.w("MainActivity", "No songs on device for AI database");
@@ -208,8 +225,6 @@ public class MainActivity extends AppCompatActivity
                 if (mini != null) mini.setPadding(mini.getPaddingLeft(), mini.getPaddingTop(),
                         mini.getPaddingRight(), bottom);
 
-
-
                 return insets;
             });
             root.requestApplyInsets();
@@ -235,6 +250,7 @@ public class MainActivity extends AppCompatActivity
             Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+
     // OPTIONAL: Force rebuild (if user wants to rescan)
     public void forceRebuildAIDatabase() {
         if (songMatcher != null) {
@@ -242,6 +258,7 @@ public class MainActivity extends AppCompatActivity
         }
         initializeAIDatabase();
     }
+
     /* ============================================================
        LibraryProvider
        ============================================================ */
@@ -344,6 +361,7 @@ public class MainActivity extends AppCompatActivity
 
         showMiniPlayer();
         syncQueueUI();
+        musicService.notifyTheAi();
     }
 
     @Override
@@ -353,10 +371,56 @@ public class MainActivity extends AppCompatActivity
         if (playerBtnPlayPause != null) playerBtnPlayPause.setImageResource(icon);
     }
 
+    /* ============================================================
+       🤖 MusicService.PlaybackListener (AI Continue)
+       ============================================================ */
+
+    @Override
+    public void onNowPlaying(Song song) {
+        // Already handled by onSongChanged
+    }
+
+    @Override
+    public void onPlaybackPaused() {
+        // Already handled by onPlaybackState
+    }
+
+    @Override
+    public void onPlaybackResumed() {
+        // Already handled by onPlaybackState
+    }
+
+    @Override
+    public void onPlaybackEnded() {
+        // Already handled by onPlaybackState
+    }
+
+    @Override
+    public void onPlaylistUpdated() {
+        // 🤖 AI added songs to queue!
+        runOnUiThread(() -> {
+            syncQueueUI();
+            updateAIStatus();
+
+            if (musicService != null &&
+                    musicService.getPlaybackMode() == MusicService.PlaybackMode.AI_CONTINUE) {
+                Toast.makeText(this, "🤖 AI added new songs!", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    @Override
+    public void onPlaybackModeChanged(MusicService.PlaybackMode mode) {
+        runOnUiThread(() -> updatePlaybackModeUI(mode));
+    }
+
+    /* ============================================================
+       View binding
+       ============================================================ */
+
     private void bindViews() {
         tabLayout = findViewById(R.id.tabLayout);
         viewPager = findViewById(R.id.viewPager);
-
 
         btnRefresh = findViewById(R.id.btnRefresh);
         btnViewLogs = findViewById(R.id.btnViewLogs);
@@ -368,6 +432,7 @@ public class MainActivity extends AppCompatActivity
         miniPlayerNext = findViewById(R.id.miniPlayerNext);
         btnMinimize = findViewById(R.id.playerBtnMinimize);
         if (btnMinimize != null) btnMinimize.setOnClickListener(v -> changePlayer(false));
+
         bottomSheetPlayer = findViewById(R.id.bottomSheetPlayer);
         if (bottomSheetPlayer == null) {
             Log.e(TAG, "bottomSheetPlayer not found. Ensure bottom_sheet_player.xml root has android:id=\"@+id/bottomSheetPlayer\".");
@@ -379,7 +444,13 @@ public class MainActivity extends AppCompatActivity
         playerBtnPlayPause = findViewById(R.id.playerBtnPlayPause);
         playerBtnNext = findViewById(R.id.playerBtnNext);
 
-        // Optional (only if you add RecyclerView in layout)
+        // 🤖 NEW: AI Continue UI elements
+        playerBtnPlaybackMode = findViewById(R.id.player_btn_playback_mode);
+        layoutAiStatus = findViewById(R.id.layout_ai_status);
+        tvAiStatus = findViewById(R.id.tv_ai_status);
+        btnAiSettings = findViewById(R.id.btn_ai_settings);
+
+        // Optional queue
         playerQueue = findViewById(R.id.playerQueue);
     }
 
@@ -404,20 +475,61 @@ public class MainActivity extends AppCompatActivity
         if (bottomSheetPlayer == null) return;
 
         bottomSheetBehavior = BottomSheetBehavior.from(bottomSheetPlayer);
-        bottomSheetBehavior.setPeekHeight(dp(this,64));
+        bottomSheetBehavior.setPeekHeight(dp(this, 64));
         bottomSheetBehavior.setHideable(false);
         changePlayer(false); //start with hidden player
+        bottomSheetBehavior.addBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
+            @Override
+            public void onStateChanged(@NonNull View bottomSheet, int newState) {
+                if (newState == BottomSheetBehavior.STATE_EXPANDED) {
+                    // Full screen - hide mini player and show minimize button
+                    miniPlayer.setVisibility(View.GONE);
+                    if (btnMinimize != null) {
+                        btnMinimize.setVisibility(View.VISIBLE);
+                    }
+                } else if (newState == BottomSheetBehavior.STATE_COLLAPSED) {
+                    // Collapsed - show mini player and hide minimize button
+                    miniPlayer.setVisibility(View.VISIBLE);
+                    if (btnMinimize != null) {
+                        btnMinimize.setVisibility(View.GONE);
+                    }
+                }
+            }
 
-
+            @Override
+            public void onSlide(@NonNull View bottomSheet, float slideOffset) {
+                // Optional: Fade mini player as full screen opens
+                miniPlayer.setAlpha(1f - slideOffset);
+            }
+        });
         if (playerBtnPrevious != null) playerBtnPrevious.setOnClickListener(v -> previous());
         if (playerBtnPlayPause != null) playerBtnPlayPause.setOnClickListener(v -> togglePlayPause());
         if (playerBtnNext != null) playerBtnNext.setOnClickListener(v -> next());
+
+        // 🤖 NEW: Playback Mode Button
+        if (playerBtnPlaybackMode != null) {
+            playerBtnPlaybackMode.setOnClickListener(v -> {
+                if (!serviceBound || musicService == null) return;
+
+                MusicService.PlaybackMode newMode = musicService.cyclePlaybackMode();
+                updatePlaybackModeUI(newMode);
+
+                String modeText = getPlaybackModeText(newMode);
+                Toast.makeText(this, modeText, Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        // 🤖 NEW: AI Settings Button
+        if (btnAiSettings != null) {
+            btnAiSettings.setOnClickListener(v -> showAISettingsDialog());
+        }
 
         if (playerQueue != null) {
             playerQueue.setLayoutManager(new LinearLayoutManager(this));
             queueAdapter = new QueueAdapter();
             playerQueue.setAdapter(queueAdapter);
         }
+
         ViewCompat.setOnApplyWindowInsetsListener(bottomSheetPlayer, (v, insets) -> {
             Insets navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
             v.setPadding(
@@ -452,6 +564,134 @@ public class MainActivity extends AppCompatActivity
     }
 
     /* ============================================================
+       🤖 AI Continue Mode UI Handlers
+       ============================================================ */
+
+    /**
+     * Update playback mode icon and UI
+     */
+    private void updatePlaybackModeUI(MusicService.PlaybackMode mode) {
+        if (playerBtnPlaybackMode == null) return;
+
+        switch (mode) {
+            case NORMAL:
+                playerBtnPlaybackMode.setImageResource(R.drawable.ic_repeat_off);
+                playerBtnPlaybackMode.setAlpha(0.5f);
+                if (layoutAiStatus != null) {
+                    layoutAiStatus.setVisibility(View.GONE);
+                }
+                break;
+
+            case REPEAT_ALL:
+                playerBtnPlaybackMode.setImageResource(R.drawable.ic_repeat_all);
+                playerBtnPlaybackMode.setAlpha(1.0f);
+                if (layoutAiStatus != null) {
+                    layoutAiStatus.setVisibility(View.GONE);
+                }
+                break;
+
+            case REPEAT_ONE:
+                playerBtnPlaybackMode.setImageResource(R.drawable.ic_repeat_one);
+                playerBtnPlaybackMode.setAlpha(1.0f);
+                if (layoutAiStatus != null) {
+                    layoutAiStatus.setVisibility(View.GONE);
+                }
+                break;
+
+            case AI_CONTINUE:
+                playerBtnPlaybackMode.setImageResource(R.drawable.ic_ai_continue);
+                playerBtnPlaybackMode.setAlpha(1.0f);
+                if (layoutAiStatus != null) {
+                    layoutAiStatus.setVisibility(View.VISIBLE);
+                    updateAIStatus();
+                }
+                break;
+        }
+    }
+
+    /**
+     * 🤖 Update AI Continue status display
+     */
+    private void updateAIStatus() {
+        if (!serviceBound || musicService == null || tvAiStatus == null) return;
+
+        int queueSize = musicService.getQueue().size();
+        int currentIndex = musicService.getCurrentIndex();
+        int remaining = queueSize - currentIndex - 1;
+        int threshold = musicService.getAIContinueThreshold();
+
+        String status = String.format(
+                "🤖 AI Continue: %d songs in queue (%d remaining)",
+                queueSize,
+                remaining
+        );
+
+        if (remaining <= threshold) {
+            status += " • Adding more...";
+        }
+
+        tvAiStatus.setText(status);
+    }
+
+    /**
+     * 🤖 Show AI Continue settings dialog
+     */
+    private void showAISettingsDialog() {
+        if (!serviceBound || musicService == null) return;
+
+        int currentThreshold = musicService.getAIContinueThreshold();
+
+        String[] options = {
+                "Add when 3 remaining (Very Aggressive)",
+                "Add when 5 remaining (Balanced)",
+                "Add when 10 remaining (Conservative)",
+                "Add when 15 remaining (Very Conservative)"
+        };
+
+        int[] thresholds = {3, 5, 10, 15};
+
+        // Find current selection
+        int selectedIndex = 1;  // Default to 5
+        for (int i = 0; i < thresholds.length; i++) {
+            if (thresholds[i] == currentThreshold) {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("🤖 AI Continue Settings")
+                .setSingleChoiceItems(options, selectedIndex, (dialog, which) -> {
+                    musicService.setAIContinueThreshold(thresholds[which]);
+                    Toast.makeText(this,
+                            "AI will add songs when " + thresholds[which] + " remaining",
+                            Toast.LENGTH_SHORT).show();
+                    updateAIStatus();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /**
+     * Get playback mode display text
+     */
+    private String getPlaybackModeText(MusicService.PlaybackMode mode) {
+        switch (mode) {
+            case NORMAL:
+                return "🔁 Normal Playback";
+            case REPEAT_ALL:
+                return "🔁 Repeat All";
+            case REPEAT_ONE:
+                return "🔂 Repeat One";
+            case AI_CONTINUE:
+                return "🤖 AI Continue Mode";
+            default:
+                return "Unknown Mode";
+        }
+    }
+
+    /* ============================================================
        Repo changes
        ============================================================ */
 
@@ -482,6 +722,9 @@ public class MainActivity extends AppCompatActivity
 
             runOnUiThread(() -> {
                 List<Song> allSongs = result.getAllSongs();
+                if (serviceBound && musicService != null) {
+                    musicService.setAvailableSongs(allSongs);
+                }
                 library.initSongs(allSongs);
 
                 if (!result.hasChanges()) {
@@ -512,15 +755,29 @@ public class MainActivity extends AppCompatActivity
         if (miniPlayer != null) miniPlayer.setVisibility(View.VISIBLE);
     }
 
-    private void changePlayer(boolean toExpend) {
+    private void changePlayer(boolean toExpand) {
         if (bottomSheetBehavior == null) return;
-        bottomSheetBehavior.setState(toExpend ? BottomSheetBehavior.STATE_EXPANDED : BottomSheetBehavior.STATE_COLLAPSED);
-        if (!toExpend){
-            btnMinimize.setVisibility(View.GONE);
-            btnMinimize.setActivated(false);
+
+        Log.d(TAG, "🎵 changePlayer: " + (toExpand ? "EXPAND" : "COLLAPSE"));
+
+        if (toExpand) {
+            // Show full player
+            bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+            miniPlayer.setVisibility(View.GONE);
+            if (btnMinimize != null) {
+                btnMinimize.setVisibility(View.VISIBLE);
+            }
+
+            // Sync queue when opening
+            syncQueueUI();
+
         } else {
-            btnMinimize.setVisibility(View.VISIBLE);
-            btnMinimize.setActivated(true);
+            // Hide full player
+            bottomSheetBehavior.setState(BottomSheetBehavior.STATE_COLLAPSED);
+            miniPlayer.setVisibility(View.VISIBLE);
+            if (btnMinimize != null) {
+                btnMinimize.setVisibility(View.GONE);
+            }
         }
     }
 
@@ -580,7 +837,8 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onStop() {
         super.onStop();
-        if (serviceBound) {
+        if (serviceBound && musicService != null) {
+            musicService.removeListener(MainActivity.this);  // 🤖 Unregister listener
             unbindService(serviceConnection);
             serviceBound = false;
         }
@@ -593,8 +851,6 @@ public class MainActivity extends AppCompatActivity
         if (activityLogger != null) activityLogger.logAppClosed();
     }
 
-
-
     /* ============================================================
        Internal queue adapter (no extra class file needed)
        ============================================================ */
@@ -604,10 +860,15 @@ public class MainActivity extends AppCompatActivity
         private int currentIndex = -1;
 
         void submit(List<Song> queue, int idx) {
+            Log.d(TAG, "📋 QueueAdapter.submit: " + queue.size() + " songs");
+
             items.clear();
-            if (queue != null) items.addAll(queue);
+            items.addAll(queue);
             currentIndex = idx;
+
             notifyDataSetChanged();
+
+            Log.d(TAG, "✅ Adapter updated: " + items.size() + " items");
         }
 
         @NonNull
@@ -621,13 +882,26 @@ public class MainActivity extends AppCompatActivity
         @Override
         public void onBindViewHolder(@NonNull VH holder, int position) {
             Song s = items.get(position);
+
             holder.title.setText(s.getTitle());
             holder.subtitle.setText(s.getArtist());
 
-            holder.itemView.setAlpha(position == currentIndex ? 1.0f : 0.6f);
+            // Highlight current song
+            if (position == currentIndex) {
+                holder.itemView.setAlpha(1.0f);
+                holder.title.setTextColor(0xFFFFFFFF); // White
+                holder.itemView.setBackgroundColor(0x33FFFFFF); // Slight highlight
+            } else {
+                holder.itemView.setAlpha(0.7f);
+                holder.title.setTextColor(0xCCFFFFFF); // Slightly dimmed
+                holder.itemView.setBackgroundColor(0x00000000); // Transparent
+            }
 
+            // Click to play this song
             holder.itemView.setOnClickListener(v -> {
                 if (!serviceBound || musicService == null) return;
+
+                Log.d(TAG, "🎵 Queue item clicked: " + position + " - " + s.getTitle());
                 musicService.playAt(position);
             });
         }

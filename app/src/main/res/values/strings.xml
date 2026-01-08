@@ -114,4 +114,6 @@
         <string name="back_to_player">Back to Player</string>
         <string name="recent_activity">RECENT ACTIVITY</string>
     <string name="aggressive">Aggressive</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="player_controls_are_in_the_bottom_sheet">Player controls are in the bottom sheet</string>
 </resources>
