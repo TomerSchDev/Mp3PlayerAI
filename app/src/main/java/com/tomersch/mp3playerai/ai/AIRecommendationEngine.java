@@ -1,9 +1,17 @@
 package com.tomersch.mp3playerai.ai;
 
+import static android.os.Build.*;
+import static android.os.Build.VERSION.*;
+import static android.os.Build.VERSION_CODES.*;
+import static com.tomersch.mp3playerai.ai.DBUtils.LOCAL_DB_NAME;
+
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.os.Build;
 import android.util.Log;
+
+import androidx.annotation.RequiresApi;
 
 import com.tomersch.mp3playerai.models.Song;
 
@@ -13,39 +21,92 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
- * AI-powered music recommendation engine using embeddings and PCA components
+ * AI-powered music recommendation engine with LEARNING!
+ * Now gets smarter over time based on user behavior
  */
 public class AIRecommendationEngine {
     private static final String TAG = "AIRecommendationEngine";
-    private static final String DB_NAME = "music_vectors_ai.db";
-    private static final String LOCAL_DB_NAME = "music_vectors_local.db";
+// === Anti-repeat + freshness tuning ===
+
+    // Don’t recommend again for a while after it was recommended (even if not played)
+    private static final long RECOMMEND_COOLDOWN_MS = 60L * 60L * 1000L; // 60 minutes
+
+    // Strong penalty window after a song was played (to push new songs)
+    private static final long RECENT_PLAY_WINDOW_MS = 30L * 60L * 1000L; // 30 minutes
+
+    // Penalty scale for “recently played”
+    private static final float RECENT_PLAY_PENALTY_MULT = 0.35f; // 65% penalty
+
+    // Bonus for songs never played (encourage exploration)
+    private static final float NEVER_PLAYED_BONUS_MULT = 1.15f; // +15%
+    private static final Float TOP_PERCENT = 0.05f;
+
+    // Keep small memory to avoid repeats even if app restarts during session (optional: persist later)
+    private final Map<String, Long> recentlyRecommendedAt = new HashMap<>();
+    // AIRecommendationEngine.java (class fields)
+
+    // How long to strongly avoid recently played songs
+    private static final long RECENT_WINDOW_MS = 30L * 60L * 1000L; // 30 minutes
+
+    // How much to penalize if within recent window
+    private static final float RECENT_PENALTY_MULT = 0.15f; // 85% reduction
 
     private Context context;
     private SQLiteDatabase database;
     private float[][] audioPCAComponents;  // 128 x 1024
     private float[][] metaPCAComponents;   // 32 x 384
 
-    // User preference tracking
+    // 🧠 NEW: AI Learning Manager
+    private AILearningManager learningManager;
+
+    // User preference tracking (kept for backward compatibility)
     private Map<String, Float> userPreferences;
     private List<String> recentlyPlayed;
     private List<String> skippedSongs;
+    private static final long COOLDOWN_STRONG_MS = 15 * 60 * 1000L; // 15 minutes
+    private static final long COOLDOWN_FADE_MS   = 90 * 60 * 1000L; // 90 minutes
+    private static final float NEVER_PLAYED_BOOST = 1.12f;         // +12% for “new” songs
     private boolean usingTempDb = false;
+    @RequiresApi(api = N)
+    private void markRecommendedNow(String path) {
+        if (path == null || path.isEmpty()) return;
+        recentlyRecommendedAt.put(path, System.currentTimeMillis());
 
+        // cleanup (keep map from growing forever)
+        long now = System.currentTimeMillis();
+        recentlyRecommendedAt.entrySet().removeIf(e -> (now - e.getValue()) > (RECOMMEND_COOLDOWN_MS * 4));
+    }
+    private boolean isInRecommendCooldown(String path) {
+        Long t = recentlyRecommendedAt.get(path);
+        if (t == null) return false;
+        return (System.currentTimeMillis() - t) < RECOMMEND_COOLDOWN_MS;
+    }
     public AIRecommendationEngine(Context context) {
         this.context = context;
         this.userPreferences = new HashMap<>();
         this.recentlyPlayed = new ArrayList<>();
         this.skippedSongs = new ArrayList<>();
 
+        // 🧠 Initialize learning manager
+        this.learningManager = new AILearningManager(context);
+
         initializeDatabase();
         loadPCAComponents();
+
+        Log.d(TAG, "✨ AI Recommendation Engine initialized with learning!");
+        Log.d(TAG, learningManager.getStats());
     }
 
     /**
@@ -135,24 +196,32 @@ public class AIRecommendationEngine {
 
         return array;
     }
-
-    /**
-     * Get song recommendations based on text query and preferences
-     */
-    public List<RecommendedSong> getRecommendations(
+    public Set<RecommendedSong> getRecommendations(
             String textQuery,
             Map<String, Integer> moodPreferences,
             int maxResults
     ) {
-        List<RecommendedSong> recommendations = new ArrayList<>();
+        if (SDK_INT >= N) {
+            return getRecommendations(textQuery, moodPreferences, maxResults, null);
+        }
+        return new TreeSet<>();
+    }
+
+    @RequiresApi(api = N)
+    public Set<RecommendedSong> getRecommendations(
+            String textQuery,
+            Map<String, Integer> moodPreferences,
+            int maxResults,
+            Set<String> excludePaths
+    ) {
+        Set<RecommendedSong> all = new HashSet<>();
 
         if (database == null) {
             Log.e(TAG, "Database not initialized");
-            return recommendations;
+            return all;
         }
 
         try {
-            // Query all songs with embeddings
             Cursor cursor = database.rawQuery(
                     "SELECT path, title, artist, genre, tags, year, " +
                             "hype, aggressive, melodic, atmospheric, cinematic, rhythmic, " +
@@ -177,8 +246,8 @@ public class AIRecommendationEngine {
                 byte[] metaBlob = cursor.getBlob(13);
                 String filename = cursor.getString(14);
 
-                // Calculate similarity score
                 float score = calculateSimilarityScore(
+                        path,
                         textQuery,
                         moodPreferences,
                         audioBlob,
@@ -187,48 +256,93 @@ public class AIRecommendationEngine {
                         genre, tags
                 );
 
-                // Apply user preference adjustments
-                score = adjustScoreByUserPreferences(path, score);
+                score = applyLearningAdjustments(path, score);
 
-                RecommendedSong recSong = new RecommendedSong();
-                recSong.path = path;
-                recSong.title = title;
-                recSong.artist = artist;
-                recSong.genre = genre;
-                recSong.tags = tags;
-                recSong.year = year;
-                recSong.score = score;
-                recSong.filename = filename;
-
-                recommendations.add(recSong);
+                RecommendedSong r = new RecommendedSong();
+                r.path = path;
+                r.title = title;
+                r.artist = artist;
+                r.genre = genre;
+                r.tags = tags;
+                r.year = year;
+                r.filename = filename;
+                r.score=applyFreshnessBias(path,score);
+                all.add(r);
             }
 
             cursor.close();
-
-            // Sort by score descending
-            Collections.sort(recommendations, new Comparator<RecommendedSong>() {
-                @Override
-                public int compare(RecommendedSong a, RecommendedSong b) {
-                    return Float.compare(b.score, a.score);
-                }
-            });
-
-            // Return top results
-            if (recommendations.size() > maxResults) {
-                recommendations = recommendations.subList(0, maxResults);
+            //remove excluded songs
+            if (excludePaths != null) {
+                all.removeIf(r -> excludePaths.contains(r.path));
             }
+
+            all = all.stream().sorted().collect(Collectors.toSet());
+
+
+            if (all.isEmpty()) return all;
+
+            // ===== NEW: "Top 5% then random pick" =====
+            // Compute bucket size = max( maxResults*3 , 5% of library, minimum 30 )
+            int n = all.size();
+            int topPercent = Math.max(1, (int) Math.ceil(n * TOP_PERCENT));  // 5%
+            int minBucket = 30;
+            int desiredBucket = Math.max(minBucket, Math.max(topPercent, maxResults * 3));
+            int bucketSize = Math.min(n, desiredBucket);
+
+            List<RecommendedSong> pool = null;
+            pool = all.stream().limit(bucketSize).collect(Collectors.toList());
+
+            // Random sample (weighted by score) from the pool
+            Set<RecommendedSong> picked = weightedSampleWithoutReplacement(pool, Math.min(maxResults, pool.size()));
+            List<RecommendedSong> toShuffle = new ArrayList<>(picked);
+
+            // Optional: final shuffle to avoid always “best-first” display
+            Collections.shuffle(toShuffle);
+
+            return toShuffle.stream().collect(Collectors.toSet());
 
         } catch (Exception e) {
             Log.e(TAG, "Error getting recommendations", e);
         }
 
-        return recommendations;
+        return all;
+    }
+
+
+
+    private float applyFreshnessBias(String path, float score) {
+        if (learningManager == null) return score;
+
+        long lastPlayedAt = 0L;
+        try {
+            lastPlayedAt = learningManager.getLastPlayedAt(path); // you add this
+        } catch (Exception ignored) {}
+
+        // Never played → small exploration bonus
+        if (lastPlayedAt <= 0L) {
+            return score * NEVER_PLAYED_BONUS_MULT;
+        }
+
+        long ageMs = System.currentTimeMillis() - lastPlayedAt;
+
+        // Recently played → strong penalty
+        if (ageMs < RECENT_PLAY_WINDOW_MS) {
+            // Optional: smooth recovery instead of hard cliff
+            // Factor goes from ~RECENT_PLAY_PENALTY_MULT up to 1.0 as it ages out
+            float t = Math.max(0f, Math.min(1f, (float) ageMs / (float) RECENT_PLAY_WINDOW_MS));
+            float mult = RECENT_PLAY_PENALTY_MULT + (1.0f - RECENT_PLAY_PENALTY_MULT) * t;
+            return score * mult;
+        }
+
+        return score;
     }
 
     /**
      * Calculate similarity score for a song
+     * 🧠 NEW: Now accepts path parameter for learning
      */
     private float calculateSimilarityScore(
+            String path,  // 🧠 NEW parameter
             String textQuery,
             Map<String, Integer> moodPreferences,
             byte[] audioBlob,
@@ -283,16 +397,13 @@ public class AIRecommendationEngine {
         }
 
         // 3. Audio embedding similarity (20% weight) - placeholder for now
-        // TODO: Implement when we have query embeddings
         if (audioBlob != null && audioBlob.length > 0) {
-            // For now, use a baseline score
             score += 0.5f * 0.2f;
             components++;
         }
 
         // 4. Meta embedding similarity (10% weight) - placeholder for now
         if (metaBlob != null && metaBlob.length > 0) {
-            // For now, use a baseline score
             score += 0.5f * 0.1f;
             components++;
         }
@@ -303,6 +414,81 @@ public class AIRecommendationEngine {
         }
 
         return 0.0f;
+    }
+    private static Set<RecommendedSong> weightedSampleWithoutReplacement(
+            List<RecommendedSong> pool, int count
+    ) {
+        if (pool == null || pool.isEmpty() || count <= 0) return new HashSet<>();
+        if (count >= pool.size()) return new HashSet<>(pool);
+
+        // Make a mutable copy
+        List<RecommendedSong> candidates = new ArrayList<>(pool);
+        Set<RecommendedSong> result = new HashSet<>(count);
+
+        // Shift scores positive and avoid zeros
+        for (int pick = 0; pick < count && !candidates.isEmpty(); pick++) {
+            double total = 0.0;
+            for (RecommendedSong r : candidates) {
+                double w = Math.max(0.0001, r.score); // ensure >0
+                total += w;
+            }
+
+            double x = Math.random() * total;
+            double run = 0.0;
+            int chosenIdx = candidates.size() - 1;
+
+            for (int i = 0; i < candidates.size(); i++) {
+                run += Math.max(0.0001, candidates.get(i).score);
+                if (run >= x) {
+                    chosenIdx = i;
+                    break;
+                }
+            }
+
+            result.add(candidates.remove(chosenIdx));
+        }
+
+        return result;
+    }
+    /**
+     * 🧠 NEW: Apply learning adjustments to base score
+     */
+    private float applyLearningAdjustments(String path, float baseScore) {
+        float adjusted = baseScore;
+
+        // 1) Learned preference boost/penalty (your existing behavior)
+        float learnedScore = learningManager.getSongScore(path);
+        if (learnedScore > 0) {
+            adjusted *= (1.0f + learnedScore * 0.5f);   // up to +50%
+        } else if (learnedScore < 0) {
+            adjusted *= (1.0f + learnedScore * 0.3f);   // penalty
+        }
+
+        // 2) Strong penalty if recently skipped (your existing behavior)
+        if (learningManager.wasRecentlySkipped(path)) {
+            adjusted *= 0.3f;
+        }
+
+        // 3) NEW: “just heard” cooldown penalty (time-based)
+        long lastPlayedAt = learningManager.getLastPlayedAt(path);
+        if (lastPlayedAt > 0) {
+            long age = System.currentTimeMillis() - lastPlayedAt;
+
+            if (age <= COOLDOWN_STRONG_MS) {
+                // very recent -> crush score
+                adjusted *= 0.15f;
+            } else if (age <= COOLDOWN_FADE_MS) {
+                // fade from 0.15 -> 1.0 linearly
+                float t = (float)(age - COOLDOWN_STRONG_MS) / (float)(COOLDOWN_FADE_MS - COOLDOWN_STRONG_MS);
+                float factor = 0.15f + 0.85f * t;
+                adjusted *= factor;
+            }
+        } else {
+            // 4) NEW: novelty boost for songs never played
+            adjusted *= NEVER_PLAYED_BOOST;
+        }
+
+        return adjusted;
     }
 
     /**
@@ -323,10 +509,10 @@ public class AIRecommendationEngine {
         String tagsLower = tags != null ? tags.toLowerCase() : "";
 
         for (String keyword : keywords) {
-            if (keyword.length() < 3) continue; // Skip short words
+            if (keyword.length() < 3) continue;
 
             if (genreLower.contains(keyword)) {
-                similarity += 2.0f; // Genre match is worth more
+                similarity += 2.0f;
                 matches++;
             }
             if (tagsLower.contains(keyword)) {
@@ -339,15 +525,13 @@ public class AIRecommendationEngine {
     }
 
     /**
-     * Adjust score based on user preferences (skip/play history)
+     * Adjust score based on user preferences (kept for backward compatibility)
      */
     private float adjustScoreByUserPreferences(String path, float baseScore) {
-        // Penalize recently skipped songs
         if (skippedSongs.contains(path)) {
             return baseScore * 0.5f;
         }
 
-        // Boost songs from preferred genres/artists
         if (userPreferences.containsKey(path)) {
             float adjustment = userPreferences.get(path);
             return baseScore * (1.0f + adjustment);
@@ -356,49 +540,79 @@ public class AIRecommendationEngine {
         return baseScore;
     }
 
+    // ===== 🧠 NEW LEARNING METHODS =====
+
     /**
      * Record that a song was played
      */
+    @RequiresApi(api = N)
     public void recordSongPlayed(String path) {
+        learningManager.recordSongPlayed(path);
+
+        // Also update old system (backward compatibility)
         if (!recentlyPlayed.contains(path)) {
             recentlyPlayed.add(0, path);
-
-            // Keep only recent 20 songs
             if (recentlyPlayed.size() > 20) {
                 recentlyPlayed.remove(recentlyPlayed.size() - 1);
             }
         }
 
-        // Boost preference for this song
         float currentPref = userPreferences.getOrDefault(path, 0.0f);
         userPreferences.put(path, Math.min(currentPref + 0.1f, 0.5f));
-
-        // Remove from skipped if it was there
         skippedSongs.remove(path);
     }
 
     /**
      * Record that a song was skipped
      */
+    @RequiresApi(api = N)
     public void recordSongSkipped(String path) {
+        learningManager.recordSongSkipped(path);
+
+        // Also update old system (backward compatibility)
         if (!skippedSongs.contains(path)) {
             skippedSongs.add(path);
-
-            // Keep only recent 50 skipped songs
             if (skippedSongs.size() > 50) {
                 skippedSongs.remove(0);
             }
         }
 
-        // Reduce preference for this song
         float currentPref = userPreferences.getOrDefault(path, 0.0f);
         userPreferences.put(path, Math.max(currentPref - 0.2f, -0.5f));
     }
 
     /**
+     * Record that a song was completed
+     */
+    public void recordSongCompleted(String path) {
+        learningManager.recordSongCompleted(path);
+    }
+
+    /**
+     * Record that a song was replayed
+     */
+    public void recordSongReplayed(String path) {
+        learningManager.recordSongReplayed(path);
+    }
+
+    /**
+     * Get learning statistics
+     */
+    public String getLearningStats() {
+        return learningManager.getStats();
+    }
+
+    /**
+     * Get learning manager (for advanced usage)
+     */
+    public AILearningManager getLearningManager() {
+        return learningManager;
+    }
+
+    /**
      * Get quick recommendations based on a mood preset
      */
-    public List<RecommendedSong> getPresetRecommendations(String preset, int maxResults) {
+    public Set<RecommendedSong> getPresetRecommendations(String preset, int maxResults) {
         Map<String, Integer> moodPrefs = new HashMap<>();
         String textQuery = "";
 
@@ -455,7 +669,7 @@ public class AIRecommendationEngine {
     /**
      * Recommended song result
      */
-    public static class RecommendedSong {
+    public static class RecommendedSong implements Comparable<RecommendedSong> {
         public String path;
         public String title;
         public String artist;
@@ -466,14 +680,25 @@ public class AIRecommendationEngine {
         public String filename;
 
         public Song toSong() {
-            // Use the proper Song constructor: (title, artist, path, duration)
             Song song = new Song(
                     title != null ? title : "Unknown",
                     artist != null ? artist : "Unknown Artist",
                     path != null ? path : "",
-                    0L  // Duration not available in database, set to 0
+                    0L
             );
             return song;
+        }
+
+        public static double getScore(Object o) {
+            if (o instanceof RecommendedSong) {
+                return ((RecommendedSong) o).score;
+            }
+            return 0;
+        }
+
+        @Override
+        public int compareTo(RecommendedSong recommendedSong) {
+            return Double.compare(getScore(this), getScore(recommendedSong));
         }
     }
 }

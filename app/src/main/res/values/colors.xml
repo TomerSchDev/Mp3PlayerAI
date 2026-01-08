@@ -7,4 +7,16 @@
     <color name="text_primary">#FFFFFF</color>
     <color name="text_secondary">#B0B0B0</color>
     <color name="accent">#DB2B2B</color>
+    <!-- Core text colors -->
+    <color name="primary_text">#212121</color>        <!-- Almost black -->
+    <color name="secondary_text">#757575</color>      <!-- Medium gray -->
+    <color name="ai_accent_bright">#00FFFF</color>
+    <!-- Icon tint -->
+    <color name="icon_tint">#FFFFFF</color>           <!-- White icons on player -->
+
+    <!-- AI accent (cyan / futuristic) -->
+    <color name="ai_accent">#00E5FF</color>
+
+    <!-- Player background (you can tweak later) -->
+    <color name="player_background">#E53935</color>   <!-- Red you are using -->
 </resources>

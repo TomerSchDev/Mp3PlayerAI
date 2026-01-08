@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -286,7 +287,7 @@ public class AIFragment extends Fragment {
         executorService.execute(() -> {
             try {
                 // Get recommendations (runs in background)
-                List<AIRecommendationEngine.RecommendedSong> recommendations =
+                Set<AIRecommendationEngine.RecommendedSong> recommendations =
                         aiEngine.getRecommendations(finalQuery, finalMoodPrefs, finalSongCount);
 
                 // Update UI on main thread

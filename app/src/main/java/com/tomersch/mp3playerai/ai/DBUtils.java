@@ -1,8 +1,14 @@
 package com.tomersch.mp3playerai.ai;
 
 
+import static com.tomersch.mp3playerai.ai.DBColumns.*;
+
 import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteStatement;
 import android.util.Log;
+
+import com.tomersch.mp3playerai.models.Song;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -17,6 +23,9 @@ public final class DBUtils {
 
     public static final String TABLE_SONGS = "songs";
     private static final String TAG = "DBUtils";
+
+    public static void addSongToDB(SQLiteStatement stmt, Song song,DBSongData dbSongData) {
+    }
     public static File copyDatabase(Context context) {
 
 // Open input stream from assets
