@@ -36,6 +36,7 @@ import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.MusicPagerAdapter;
+import com.tomersch.mp3playerai.ai.SongMatcher;
 import com.tomersch.mp3playerai.models.Song;
 import com.tomersch.mp3playerai.models.Tab;
 import com.tomersch.mp3playerai.player.LibraryProvider;
@@ -48,7 +49,6 @@ import com.tomersch.mp3playerai.utils.UserActivityLogger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * MainActivity
@@ -60,6 +60,8 @@ public class MainActivity extends AppCompatActivity
         implements PlayerController, LibraryProvider, MusicService.Callback {
 
     private static final String TAG = "MP3Player";
+    //private final boolean DEBUG = true;
+
     private static final int PERMISSION_REQUEST_CODE = 100;
 
 
@@ -106,6 +108,7 @@ public class MainActivity extends AppCompatActivity
     // Pending play if user taps before bind completes
     private ArrayList<Song> pendingQueue = null;
     private int pendingIndex = -1;
+    private SongMatcher songMatcher;
 
     private final Runnable repoListener = this::onRepositoryChanged;
 
@@ -142,6 +145,54 @@ public class MainActivity extends AppCompatActivity
             musicService = null;
         }
     };
+
+    private void initializeAIDatabase() {
+        songMatcher = new SongMatcher(this);
+
+        // Run in background thread
+        new Thread(() -> {
+            try {
+                // Get all songs from device
+                List<Song> allSongs = library.getAllSongs(); // Your existing method
+
+                if (allSongs == null || allSongs.isEmpty()) {
+                    Log.w("MainActivity", "No songs on device for AI database");
+                    return;
+                }
+
+                // SMART CHECK: Only rebuild if needed
+                boolean needsRebuild = songMatcher.needsRebuild(allSongs);
+
+                if (!needsRebuild) {
+                    Log.d("MainActivity", "✅ AI database is up to date - no rebuild needed!");
+                    runOnUiThread(() -> Toast.makeText(this, "AI ready! 🎵", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+
+                // Rebuild is needed
+                Log.d("MainActivity", "Building AI database with " + allSongs.size() + " songs...");
+
+                runOnUiThread(() -> Toast.makeText(this, "Building AI database...", Toast.LENGTH_SHORT).show());
+
+                // Build local database
+                long startTime = System.currentTimeMillis();
+                String localDbPath = songMatcher.buildLocalDatabase(allSongs);
+                long endTime = System.currentTimeMillis();
+
+                if (localDbPath != null) {
+                    Log.d("MainActivity", "✅ AI database built in " + (endTime - startTime) + "ms");
+                    runOnUiThread(() -> Toast.makeText(this, "✨ AI database ready!", Toast.LENGTH_SHORT).show());
+                } else {
+                    Log.e("MainActivity", "❌ Failed to build AI database");
+                    runOnUiThread(() -> Toast.makeText(this, "Failed to build AI database", Toast.LENGTH_LONG).show());
+                }
+
+            } catch (Exception e) {
+                Log.e("MainActivity", "Error with AI database", e);
+            }
+        }).start();
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -177,13 +228,20 @@ public class MainActivity extends AppCompatActivity
 
             if (checkPermissions()) loadSongs();
             else requestPermissions();
-
+            initializeAIDatabase();
+            if (DEBUG) forceRebuildAIDatabase();
         } catch (Exception e) {
             Log.e(TAG, "onCreate error: " + e.getMessage(), e);
             Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
-
+    // OPTIONAL: Force rebuild (if user wants to rescan)
+    public void forceRebuildAIDatabase() {
+        if (songMatcher != null) {
+            songMatcher.deleteLocalDatabase();
+        }
+        initializeAIDatabase();
+    }
     /* ============================================================
        LibraryProvider
        ============================================================ */

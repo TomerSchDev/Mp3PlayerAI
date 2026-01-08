@@ -145,7 +145,7 @@ public class ManualFileScanner {
     /**
      * Create a Song object from a file
      */
-    private static Song createSongFromFile(File file) {
+    public static Song createSongFromFile(File file) {
         try {
             MediaMetadataRetriever retriever = new MediaMetadataRetriever();
             retriever.setDataSource(file.getAbsolutePath());

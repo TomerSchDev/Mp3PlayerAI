@@ -2,6 +2,7 @@ package com.tomersch.mp3playerai.models;
 
 import androidx.fragment.app.Fragment;
 
+import com.tomersch.mp3playerai.fragments.AIFragment;
 import com.tomersch.mp3playerai.fragments.AllSongsFragment;
 import com.tomersch.mp3playerai.fragments.CustomFragment;
 import com.tomersch.mp3playerai.fragments.FavoritesFragment;
@@ -21,11 +22,12 @@ public enum Tab {
     FOLDERS("Folders") {
         @Override public Fragment create() { return FoldersFragment.newInstance(); }
     },
-    CUSTOM("Custom") {
-        @Override public Fragment create() { return CustomFragment.newInstance(); }
+    Ai("AI") {
+        @Override public Fragment create() { return AIFragment.newInstance(); }
     };
 
     private final String label;
+
 
     Tab(String label) { this.label = label; }
 
@@ -39,7 +41,7 @@ public enum Tab {
             PLAYLISTS.label,
             ALL.label,
             FOLDERS.label,
-            CUSTOM.label
+            Ai.label
     };
 
     public Fragment getFragment() {
