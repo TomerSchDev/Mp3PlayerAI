@@ -102,8 +102,7 @@ public class SongMatcher {
                             "audio_blob BLOB, " +
                             "meta_blob BLOB, " +
                             "filename TEXT, " +
-                            "last_time_played TEXT"+
-                            ", primary key(filename))"
+                            "last_time_played TEXT)"
             );
 
             // STEP 1: Map ALL database songs by normalized filename
@@ -112,7 +111,7 @@ public class SongMatcher {
             Map<String, DBSongData> dbSongMap = new HashMap<>();
 
             // Use the clean column order from DBColumns
-            String query = "SELECT " + DBColumns.getSelectColumns() + " FROM "+ DBUtils.TABLE_SONGS;
+            String query = "SELECT " + DBColumns.getSelectColumns(true) + " FROM "+ DBUtils.TABLE_SONGS;
             Cursor cursor = sourceDb.rawQuery(query, null);
 
             while (cursor.moveToNext()) {
@@ -129,7 +128,7 @@ public class SongMatcher {
             // STEP 2: For each device song, check if in DB or categorize
             Log.d(TAG, "📱 Step 2: Processing device songs...");
 
-            String insertSql = "INSERT INTO songs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            String insertSql = "INSERT INTO songs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)";
             SQLiteStatement stmt = localDb.compileStatement(insertSql);
 
             int matchCount = 0;

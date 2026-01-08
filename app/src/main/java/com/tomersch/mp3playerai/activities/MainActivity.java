@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity
         MusicService.PlaybackListener {
 
     private static final String TAG = "MP3Player";
-    private final boolean DEBUG = false;
+    private final boolean DEBUG = true;
 
     private static final int PERMISSION_REQUEST_CODE = 100;
 
@@ -243,8 +243,8 @@ public class MainActivity extends AppCompatActivity
 
             if (checkPermissions()) loadSongs();
             else requestPermissions();
-            initializeAIDatabase();
             if (DEBUG) forceRebuildAIDatabase();
+            initializeAIDatabase();
         } catch (Exception e) {
             Log.e(TAG, "onCreate error: " + e.getMessage(), e);
             Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -256,7 +256,6 @@ public class MainActivity extends AppCompatActivity
         if (songMatcher != null) {
             songMatcher.deleteLocalDatabase();
         }
-        initializeAIDatabase();
     }
 
     /* ============================================================

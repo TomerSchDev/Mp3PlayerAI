@@ -82,13 +82,17 @@ public enum DBColumns {
      * Usage: "SELECT " + getSelectColumns() + " FROM songs"
      */
     public static String getSelectColumns() {
+        return getSelectColumns(false);
+    }
+    public static String getSelectColumns(boolean removeLastComma) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < columns.length; i++) {
+        for (int i = 0; i < columns.length - (removeLastComma ? 1 : 0); i++) {
             if (i > 0) sb.append(", ");
             sb.append(columns[i].getName());
         }
         return sb.toString();
     }
+
 
     // ===== DATABASE SONG DATA CLASS =====
 

@@ -214,7 +214,7 @@ public class AIRecommendationEngine {
             int maxResults,
             Set<String> excludePaths
     ) {
-        Set<RecommendedSong> all = new HashSet<>();
+        Set<RecommendedSong> all = new TreeSet<>();
 
         if (database == null) {
             Log.e(TAG, "Database not initialized");
@@ -225,7 +225,7 @@ public class AIRecommendationEngine {
             Cursor cursor = database.rawQuery(
                     "SELECT path, title, artist, genre, tags, year, " +
                             "hype, aggressive, melodic, atmospheric, cinematic, rhythmic, " +
-                            "audio_blob, meta_blob, filename FROM songs",
+                            "audio_blob, meta_blob, filename,last_time_played FROM songs",
                     null
             );
 
@@ -245,6 +245,9 @@ public class AIRecommendationEngine {
                 byte[] audioBlob = cursor.getBlob(12);
                 byte[] metaBlob = cursor.getBlob(13);
                 String filename = cursor.getString(14);
+                String lastPlayedAt = cursor.getString(15);
+
+
 
                 float score = calculateSimilarityScore(
                         path,
