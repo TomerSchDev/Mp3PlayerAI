@@ -34,7 +34,7 @@ public class AIRecommendationEngine implements AutoCloseable {
     private final AILearningManager learningManager;
 
     // Reusable LLM parser (you can also use for playlist naming)
-    private final LocalLlmQueryParser llmParser;
+    private final LocalLlmInterpreter llmParser;
 
     public AIRecommendationEngine(Context context, String modelTaskPath) {
         this.appContext = context.getApplicationContext();
@@ -43,7 +43,7 @@ public class AIRecommendationEngine implements AutoCloseable {
         this.database = openDatabaseOrThrow(appContext);
 
         // LLM parser is separate and reusable
-        this.llmParser = new LocalLlmQueryParser(appContext, modelTaskPath);
+        this.llmParser = new LocalLlmInterpreter(appContext, modelTaskPath);
 
         Log.d(TAG, "Initialized. " + learningManager.getStats());
     }
@@ -69,7 +69,7 @@ public class AIRecommendationEngine implements AutoCloseable {
         if (excludePaths == null) excludePaths = new HashSet<>();
 
         // LLM -> structured vector
-        QueryProfile profile = llmParser.parseToProfile(textQuery);
+        QueryProfile profile = llmParser.parseQuery(textQuery);
 
         // Debug: confirm DB has rows (helps with your “cursor loop ends immediately” issue)
         int totalRows = getSongCountSafe();
@@ -82,14 +82,12 @@ public class AIRecommendationEngine implements AutoCloseable {
 
         // Pull only what you need.
         // You can extend with meta/audio embedding blobs later.
-        Cursor cursor = null;
-        try {
-            cursor = database.rawQuery(
-                    "SELECT path, title, artist, genre, tags, year, " +
-                            "hype, aggressive, melodic, atmospheric, cinematic, rhythmic, filename " +
-                            "FROM songs",
-                    null
-            );
+        try (Cursor cursor = database.rawQuery(
+                "SELECT path, title, artist, genre, tags, year, " +
+                        "hype, aggressive, melodic, atmospheric, cinematic, rhythmic, filename " +
+                        "FROM songs",
+                null
+        )) {
 
             while (cursor.moveToNext()) {
                 String path = cursor.getString(0);
@@ -150,8 +148,6 @@ public class AIRecommendationEngine implements AutoCloseable {
         } catch (Exception e) {
             Log.e(TAG, "Recommendation query failed", e);
             return new ArrayList<>();
-        } finally {
-            if (cursor != null) cursor.close();
         }
 
         if (candidates.isEmpty()) {

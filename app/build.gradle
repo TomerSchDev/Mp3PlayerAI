@@ -1,52 +1,95 @@
+// app/build.gradle
+// CORRECTED VERSION with proper plugin declarations
+
 plugins {
     id 'com.android.application'
 }
 
 android {
     namespace 'com.tomersch.mp3playerai'
-    compileSdk 36
+    compileSdk 34
+
     defaultConfig {
-        ndk {
-            abiFilters "arm64-v8a"   // your S23
-        }
         applicationId "com.tomersch.mp3playerai"
-        minSdk 23
-        targetSdk 36
+        minSdk 24
+        targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // NDK Configuration
+        ndk {
+            // Only build for 64-bit ARM (most modern devices)
+            // Add 'armeabi-v7a' for 32-bit support if needed
+            abiFilters 'arm64-v8a'
+        }
+
+        // CMake arguments
         externalNativeBuild {
             cmake {
-                cppFlags "-O3 -std=c++17"
+                cppFlags "-std=c++11 -O3 -DNDEBUG"
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
     }
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1" // or whatever you have installed
-        }
-    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            // Don't strip native libraries in release
+            packagingOptions {
+                jniLibs {
+                    keepDebugSymbols += ['**/*.so']
+                }
+            }
+        }
+
+        debug {
+            // Faster builds
+            debuggable true
         }
     }
 
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
+    // NDK Build Configuration
     externalNativeBuild {
         cmake {
-            path file('src/main/cpp/CMakeLists.txt')
-            version '3.22.1'
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"  // Use a recent CMake version
         }
+    }
+
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // For WorkManager (background tasks)
+    buildFeatures {
+        viewBinding true
     }
 }
 
 dependencies {
+    // AndroidX
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    // WorkManager for background tasks (model download, LLM processing)
+    implementation 'androidx.work:work-runtime:2.8.1'
+
+    // Optional: Gson for JSON parsing (if you want better JSON handling)
+
+    // Testing
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+
+    //----------
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
@@ -57,14 +100,21 @@ dependencies {
     implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
     implementation 'com.google.android.material:material:1.9.0'  // ADD THIS
     implementation 'androidx.appcompat:appcompat:1.7.1'
-    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
-    implementation libs.work.runtime
     implementation "androidx.work:work-runtime:2.9.0"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
-
 }
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+
+// Optional: Task to show NDK build output
+tasks.register('showNdkLibs') {
+    doLast {
+        def outputDir = file("$buildDir/intermediates/cmake/debug/obj/arm64-v8a")
+        if (outputDir.exists()) {
+            println "NDK libraries built:"
+            outputDir.eachFile { file ->
+                println "  ${file.name} (${file.length() / 1024} KB)"
+            }
+        } else {
+            println "No NDK libraries found. Run 'assembleDebug' first."
+        }
     }
 }
