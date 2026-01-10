@@ -25,6 +25,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * Enhanced Music Service with AI Continue Mode
@@ -94,6 +96,7 @@ public class MusicService extends Service {
         }
     }
 
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -113,8 +116,7 @@ public class MusicService extends Service {
         allAvailableSongs = new HashSet<>();
         sessionGenreCount = new HashMap<>();
         sessionMoodScores = new HashMap<>();
-
-        aiEngine = new AIRecommendationEngine(this);
+        aiEngine = new AIRecommendationEngine(this,"");
         Log.d(TAG, "🧠 AI Learning initialized!");
         Log.d(TAG, aiEngine.getLearningStats());
 
@@ -137,7 +139,6 @@ public class MusicService extends Service {
 
         setupMediaPlayerListeners();
     }
-
 
     private void setupMediaPlayerListeners() {
         // ✅ Track song completion
@@ -261,11 +262,7 @@ public class MusicService extends Service {
         Set<RecommendedSong> recommendations = null;
         if (SDK_INT >= N) {
             recommendations = aiEngine.getRecommendations(
-                    topGenres,
-                    moodScores,
-                    targetCount * 3,
-                    excluded
-            );
+                    "",0,excluded).stream().limit(targetCount * 3).collect(Collectors.toSet());
         }
         if (recommendations.isEmpty()) {
             Log.w(TAG, "🤖 AI Continue: No recommendations received from AI engine!");
@@ -439,8 +436,8 @@ public class MusicService extends Service {
         String textQuery = analyzeSessionGenres();
 
         // Get AI recommendations
-        Set<RecommendedSong> recommendations =
-                aiEngine.getRecommendations(textQuery, sessionMoodPrefs, count * 3);  // Get 3x to filter
+        List<RecommendedSong> recommendations =
+                aiEngine.getRecommendations(textQuery,  count * 3,new TreeSet<>());  // Get 3x to filter
 
         if (recommendations.isEmpty()) {
             Log.w(TAG, "🤖 AI Continue: No recommendations available");

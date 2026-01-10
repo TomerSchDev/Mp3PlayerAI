@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
@@ -24,11 +25,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
+        <activity android:name=".activities.ModelManagerActivity" />
         <activity
             android:name=".activities.LogsActivity"
             android:exported="false"
             android:label="Activity Logs" />
+
+        <activity
+            android:name=".activities.DevActivity"
+            android:exported="false"
+            android:label="Developer Controls" />
 
         <service
             android:name=".services.MusicService"

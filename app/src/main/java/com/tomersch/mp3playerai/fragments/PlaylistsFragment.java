@@ -67,6 +67,7 @@ public class PlaylistsFragment extends Fragment {
         }
     }
 
+
     @Nullable
     @Override
     public View onCreateView(
@@ -79,7 +80,7 @@ public class PlaylistsFragment extends Fragment {
         rvPlaylists = view.findViewById(R.id.rvPlaylists);
         FloatingActionButton fabGlobal =view.findViewById(R.id.fabCreatePlaylist);
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) fabGlobal.getLayoutParams();
-        lp.bottomMargin = dp(Objects.requireNonNull(this.getContext()),16) + dp(this.getContext(),64); // 64dp mini player height
+        lp.bottomMargin = dp(this.requireContext(),16) + dp(this.requireContext(),64); // 64dp mini player height
         fabGlobal.setLayoutParams(lp);
         fabGlobal.setOnClickListener(v -> showCreatePlaylistDialog());
 
@@ -103,26 +104,6 @@ public class PlaylistsFragment extends Fragment {
         super.onStop();
         if (repo != null) repo.removeListener(repoListener);
     }
-
-    private void loadPlaylists() {
-        if (repo == null) return;
-
-        List<Playlist> playlists = repo.getPlaylists();
-
-        if (playlists == null || playlists.isEmpty()) {
-            rvPlaylists.setVisibility(View.GONE);
-            emptyState.setVisibility(View.VISIBLE);
-            return;
-        }
-
-        rvPlaylists.setVisibility(View.VISIBLE);
-        emptyState.setVisibility(View.GONE);
-
-        PlaylistAdapter adapter = new PlaylistAdapter(playlists, this::openPlaylist);
-        adapter.setOnPlaylistLongClickListener(this::showPlaylistOptions);
-        rvPlaylists.setAdapter(adapter);
-    }
-
     private void showCreatePlaylistDialog() {
         if (getContext() == null || repo == null) return;
 
@@ -150,6 +131,26 @@ public class PlaylistsFragment extends Fragment {
         builder.setNegativeButton(R.string.dialog_cancel, (dialog, which) -> dialog.cancel());
         builder.show();
     }
+    private void loadPlaylists() {
+        if (repo == null) return;
+
+        List<Playlist> playlists = repo.getPlaylists();
+
+        if (playlists == null || playlists.isEmpty()) {
+            rvPlaylists.setVisibility(View.GONE);
+            emptyState.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        rvPlaylists.setVisibility(View.VISIBLE);
+        emptyState.setVisibility(View.GONE);
+
+        PlaylistAdapter adapter = new PlaylistAdapter(playlists, this::openPlaylist);
+        adapter.setOnPlaylistLongClickListener(this::showPlaylistOptions);
+        rvPlaylists.setAdapter(adapter);
+    }
+
+
     private void openPlaylist(Playlist playlist) {
         openPlaylist(playlist, true); // user click => backstack
     }

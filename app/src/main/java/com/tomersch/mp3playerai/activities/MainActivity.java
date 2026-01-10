@@ -10,13 +10,17 @@ import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -38,6 +42,7 @@ import com.google.android.material.tabs.TabLayoutMediator;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.MusicPagerAdapter;
 import com.tomersch.mp3playerai.ai.SongMatcher;
+import com.tomersch.mp3playerai.models.Playlist;
 import com.tomersch.mp3playerai.models.Song;
 import com.tomersch.mp3playerai.models.Tab;
 import com.tomersch.mp3playerai.player.LibraryProvider;
@@ -50,6 +55,8 @@ import com.tomersch.mp3playerai.utils.UserActivityLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * MainActivity - Enhanced with AI Continue Mode
@@ -63,7 +70,6 @@ public class MainActivity extends AppCompatActivity
         MusicService.PlaybackListener {
 
     private static final String TAG = "MP3Player";
-    private final boolean DEBUG = true;
 
     private static final int PERMISSION_REQUEST_CODE = 100;
 
@@ -74,6 +80,8 @@ public class MainActivity extends AppCompatActivity
     // Toolbar buttons
     private ImageButton btnRefresh;
     private ImageButton btnViewLogs;
+    private ImageButton btnDev;
+
 
     // Mini player
     private LinearLayout miniPlayer;
@@ -233,7 +241,7 @@ public class MainActivity extends AppCompatActivity
             cacheManager = new SongCacheManager(this);
             activityLogger = new UserActivityLogger(this);
             activityLogger.logAppOpened();
-
+            setupSeekBar();
             bindViews();
             setupTabs();
             setupMiniPlayer();
@@ -243,19 +251,31 @@ public class MainActivity extends AppCompatActivity
 
             if (checkPermissions()) loadSongs();
             else requestPermissions();
-            if (DEBUG) forceRebuildAIDatabase();
             initializeAIDatabase();
         } catch (Exception e) {
             Log.e(TAG, "onCreate error: " + e.getMessage(), e);
             Toast.makeText(this, "Error starting app: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+    // 5. ADD THIS METHOD to stop SeekBar updates:
+    private void stopSeekBarUpdate() {
+        if (seekBarHandler != null && seekBarRunnable != null) {
+            seekBarHandler.removeCallbacks(seekBarRunnable);
+        }
+    }
 
+    // 6. ADD THIS HELPER METHOD to format time (mm:ss):
+    private String formatTime(int milliseconds) {
+        int seconds = (milliseconds / 1000) % 60;
+        int minutes = (milliseconds / (1000 * 60)) % 60;
+        return String.format(Locale.ROOT,"%d:%02d", minutes, seconds);
+    }
     // OPTIONAL: Force rebuild (if user wants to rescan)
     public void forceRebuildAIDatabase() {
         if (songMatcher != null) {
             songMatcher.deleteLocalDatabase();
         }
+        initializeAIDatabase();
     }
 
     /* ============================================================
@@ -290,11 +310,17 @@ public class MainActivity extends AppCompatActivity
         showMiniPlayer();
         changePlayer(true);
     }
+    // 2. ADD THESE FIELDS to MainActivity class:
+    private SeekBar seekBar;
+    private TextView tvCurrentTime;
+    private TextView tvTotalTime;
+    private Handler seekBarHandler;
+    private Runnable seekBarRunnable;
+    private boolean isUserSeeking = false;
 
     @Override
     public void playSong(Song song) {
         if (song == null) return;
-
         // Prefer playing in context of "All songs" queue
         List<Song> all = library.getAllSongs();
         int idx = -1;
@@ -311,6 +337,75 @@ public class MainActivity extends AppCompatActivity
             single.add(song);
             playQueue(single, 0);
         }
+        updateSeekBarForNewSong();
+    }
+    private void setupSeekBar() {
+        seekBar = findViewById(R.id.playerSeekBar);
+        tvCurrentTime = findViewById(R.id.tvCurrentTime);
+        tvTotalTime = findViewById(R.id.tvTotalTime);
+
+        // Initialize handler for updating SeekBar
+        seekBarHandler = new Handler(Looper.getMainLooper());
+
+        // SeekBar change listener
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    // Update current time TextView as user drags
+                    int currentPosition = (int) ((progress / 100.0) * musicService.getDuration());
+                    tvCurrentTime.setText(formatTime(currentPosition));
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                isUserSeeking = true;
+                // Stop auto-updating while user is seeking
+                stopSeekBarUpdate();
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                isUserSeeking = false;
+                // Seek to the position
+                if (musicService != null && musicService.getDuration() > 0) {
+                    int seekPosition = (int) ((seekBar.getProgress() / 100.0) * musicService.getDuration());
+                    musicService.seekTo(seekPosition);
+                }
+                // Resume auto-updating
+                startSeekBarUpdate();
+            }
+        });
+
+        // Start updating SeekBar
+        startSeekBarUpdate();
+    }
+
+    private void startSeekBarUpdate() {
+        seekBarRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (musicService != null && musicService.isPlaying() && !isUserSeeking) {
+                    int currentPosition = musicService.getCurrentPosition();
+                    int duration = musicService.getDuration();
+
+                    if (duration > 0) {
+                        // Update SeekBar progress
+                        int progress = (int) ((currentPosition / (float) duration) * 100);
+                        seekBar.setProgress(progress);
+
+                        // Update time displays
+                        tvCurrentTime.setText(formatTime(currentPosition));
+                        tvTotalTime.setText(formatTime(duration));
+                    }
+                }
+
+                // Schedule next update in 1 second
+                seekBarHandler.postDelayed(this, 1000);
+            }
+        };
+        seekBarHandler.post(seekBarRunnable);
     }
 
     @Override
@@ -423,6 +518,7 @@ public class MainActivity extends AppCompatActivity
 
         btnRefresh = findViewById(R.id.btnRefresh);
         btnViewLogs = findViewById(R.id.btnViewLogs);
+        btnDev = findViewById(R.id.btnDev);
 
         miniPlayer = findViewById(R.id.miniPlayer);
         miniPlayerTitle = findViewById(R.id.miniPlayerTitle);
@@ -551,7 +647,7 @@ public class MainActivity extends AppCompatActivity
                 requestPermissions();
             }
         });
-
+        btnDev.setOnClickListener(v -> startActivity(new Intent(this, DevActivity.class)));
         btnViewLogs.setOnClickListener(v -> startActivity(new Intent(this, LogsActivity.class)));
 
         btnRefresh.setOnLongClickListener(v -> {
@@ -848,12 +944,20 @@ public class MainActivity extends AppCompatActivity
         super.onDestroy();
         if (library != null) library.removeListener(repoListener);
         if (activityLogger != null) activityLogger.logAppClosed();
+        stopSeekBarUpdate(); // Add this line
     }
 
     /* ============================================================
        Internal queue adapter (no extra class file needed)
        ============================================================ */
-
+    private void updateSeekBarForNewSong() {
+        if (musicService != null) {
+            int duration = musicService.getDuration();
+            tvTotalTime.setText(formatTime(duration));
+            tvCurrentTime.setText("0:00");
+            seekBar.setProgress(0);
+        }
+    }
     private final class QueueAdapter extends RecyclerView.Adapter<QueueAdapter.VH> {
         private final List<Song> items = new ArrayList<>();
         private int currentIndex = -1;

@@ -1,6 +1,7 @@
 package com.tomersch.mp3playerai.fragments;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,17 +25,20 @@ import com.google.android.material.card.MaterialCardView;
 import com.tomersch.mp3playerai.R;
 import com.tomersch.mp3playerai.adapters.SongAdapter;
 import com.tomersch.mp3playerai.ai.AIRecommendationEngine;
+import com.tomersch.mp3playerai.models.Playlist;
 import com.tomersch.mp3playerai.models.Song;
 import com.tomersch.mp3playerai.player.LibraryProvider;
 import com.tomersch.mp3playerai.player.PlayerController;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 public class AIFragment extends Fragment {
 
@@ -60,6 +64,7 @@ public class AIFragment extends Fragment {
     private ExecutorService executorService;
     private Handler mainHandler;
     private PlayerController playerController;
+    private LibraryProvider libraryProvider;
 
     public static Fragment newInstance() {
         return new AIFragment();
@@ -74,6 +79,12 @@ public class AIFragment extends Fragment {
         } else {
             throw new IllegalStateException("Host activity must implement PlayerController");
         }
+        if (context instanceof LibraryProvider) {
+            libraryProvider = (LibraryProvider) context;
+        }else {
+            throw new IllegalStateException("Host activity must implement LibraryProvider");
+        }
+
     }
 
     @Nullable
@@ -90,7 +101,7 @@ public class AIFragment extends Fragment {
         setupListeners();
 
         // Initialize AI engine
-        aiEngine = new AIRecommendationEngine(getContext());
+        aiEngine = new AIRecommendationEngine(getContext(),"");
 
         // Setup RecyclerView
         generatedSongs = new ArrayList<>();
@@ -287,8 +298,13 @@ public class AIFragment extends Fragment {
         executorService.execute(() -> {
             try {
                 // Get recommendations (runs in background)
-                Set<AIRecommendationEngine.RecommendedSong> recommendations =
-                        aiEngine.getRecommendations(finalQuery, finalMoodPrefs, finalSongCount);
+                Set<AIRecommendationEngine.RecommendedSong> recommendations;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    recommendations = aiEngine.getRecommendations(finalQuery,  finalSongCount, new HashSet<>()).stream().collect(Collectors.toSet());
+                }else {
+                    recommendations = null;
+                    return;
+                }
 
                 // Update UI on main thread
                 mainHandler.post(() -> {
@@ -331,7 +347,7 @@ public class AIFragment extends Fragment {
                     Toast.makeText(getContext(),
                             "Error generating playlist: " + e.getMessage(),
                             Toast.LENGTH_LONG).show();
-                    e.printStackTrace();
+
                 });
             }
         });
@@ -342,28 +358,33 @@ public class AIFragment extends Fragment {
             return;
         }
 
-        // TODO: Integrate with your music player service
-        // For now, just show a toast
+        playerController.playQueue(generatedSongs, 0);
         Toast.makeText(getContext(),
-                "Playing " + generatedSongs.size() + " songs...",
+                "Playing all generated songs!",
                 Toast.LENGTH_SHORT).show();
-
-        // Example: Start playing the first song
-        // getMusicService().playSongs(generatedSongs, 0);
     }
 
     private void savePlaylist() {
         if (generatedSongs.isEmpty()) {
             return;
         }
+        String playListName = etTextQuery.getText().toString().trim();
 
-        // TODO: Implement playlist saving dialog
+        Playlist playList =libraryProvider.getLibraryRepository().createPlaylist("AI Made");
+        if (playList == null) {
+            Toast.makeText(getContext(),
+                    "No playlist name provided",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         Toast.makeText(getContext(),
-                "Save playlist feature coming soon!",
+                "Saving playlist...",
                 Toast.LENGTH_SHORT).show();
+        for (Song s: generatedSongs) {
+            libraryProvider.getLibraryRepository().addSongToPlaylist(playList.getId(),s);
+        }
 
-        // Example: Show dialog to name and save playlist
-        // showSavePlaylistDialog(generatedSongs);
+
     }
 
     @Override

@@ -29,6 +29,19 @@
                 android:textStyle="bold"
                 android:textColor="@android:color/white"
                 android:layout_gravity="center_vertical" />
+
+            <!-- Dev Button (NEW) -->
+            <ImageButton
+                android:id="@+id/btnDev"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Developer Controls"
+                android:src="@android:drawable/ic_menu_manage"
+                app:tint="#FFFFFF" />
+
             <ImageButton
                 android:id="@+id/btnViewLogs"
                 android:layout_width="48dp"

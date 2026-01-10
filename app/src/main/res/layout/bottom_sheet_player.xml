@@ -82,13 +82,38 @@
                 android:textSize="16sp" />
         </LinearLayout>
 
-        <!-- Seek Bar -->
+        <TextView
+            android:id="@+id/tvCurrentTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0:00"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="4dp" />
+
+        <!-- SeekBar -->
         <SeekBar
             android:id="@+id/playerSeekBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginTop="16dp" />
+            android:max="100"
+            android:progress="0"
+            android:progressTint="#6200EE"
+            android:thumbTint="#6200EE"
+            android:layout_marginBottom="4dp" />
+
+        <!-- Total Duration -->
+        <TextView
+            android:id="@+id/tvTotalTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:text="0:00"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="24dp" />
+
+
 
         <!-- Playback Controls -->
         <LinearLayout
